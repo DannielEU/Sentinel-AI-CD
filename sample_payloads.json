@@ -1,0 +1,59 @@
+{
+  "approved_case": {
+    "image_name": "myapp:1.2.3",
+    "image_size_mb": 280,
+    "vulnerabilities": {
+      "critical": 0,
+      "high": 0,
+      "medium": 4,
+      "low": 12,
+      "unknown": 0
+    },
+    "base_image": "python:3.11-slim",
+    "os_family": "debian"
+  },
+
+  "warning_high_vulns": {
+    "image_name": "legacy-api:0.9.1",
+    "image_size_mb": 450,
+    "vulnerabilities": {
+      "critical": 0,
+      "high": 3,
+      "medium": 14,
+      "low": 30,
+      "unknown": 2
+    },
+    "base_image": "ubuntu:20.04",
+    "os_family": "debian",
+    "scanner_output": "High: CVE-2023-1234 in libssl1.1 ..."
+  },
+
+  "rejected_critical": {
+    "image_name": "broken-app:2.0.0",
+    "image_size_mb": 600,
+    "vulnerabilities": {
+      "critical": 2,
+      "high": 8,
+      "medium": 25,
+      "low": 40,
+      "unknown": 5
+    },
+    "base_image": "node:14",
+    "os_family": "debian",
+    "dockerfile_content": "FROM node:14\nCOPY . /app\nRUN npm install\nCMD [\"node\", \"server.js\"]"
+  },
+
+  "warning_large_image": {
+    "image_name": "fat-service:3.1.0",
+    "image_size_mb": 1500,
+    "vulnerabilities": {
+      "critical": 0,
+      "high": 0,
+      "medium": 2,
+      "low": 5,
+      "unknown": 0
+    },
+    "base_image": "ubuntu:22.04",
+    "os_family": "debian"
+  }
+}

@@ -1,0 +1,49 @@
+services:
+
+  # ── Ollama — local LLM server ───────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: devsecops-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Pull the mistral model on first start
+    entrypoint: >
+      sh -c "ollama serve &
+             sleep 5 &&
+             ollama pull mistral &&
+             wait"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── AI Deployment Gate — FastAPI service ────────────────────────────────────
+  gate:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    container_name: devsecops-gate
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  ollama_data:
+    driver: local

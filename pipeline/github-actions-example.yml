@@ -1,0 +1,72 @@
+name: CI/CD with AI Security Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  IMAGE_NAME: ${{ github.repository }}:${{ github.sha }}
+  GATE_URL: http://localhost:8000
+
+jobs:
+  build-and-gate:
+    runs-on: ubuntu-latest
+
+    services:
+      # Start Ollama sidecar
+      ollama:
+        image: ollama/ollama:latest
+        ports:
+          - 11434:11434
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. Build image ───────────────────────────────────────────────────────
+      - name: Build Docker image
+        run: docker build -t $IMAGE_NAME .
+
+      # ── 3. Pull Mistral model ────────────────────────────────────────────────
+      - name: Pull Mistral model into Ollama
+        run: |
+          sleep 5
+          curl -s http://localhost:11434/api/pull \
+            -d '{"name":"mistral"}' | tail -1
+
+      # ── 4. Start gate service ────────────────────────────────────────────────
+      - name: Start AI Deployment Gate
+        run: |
+          pip install fastapi uvicorn httpx pydantic
+          cd app && uvicorn main:app --port 8000 &
+          sleep 3
+          curl -sf http://localhost:8000/health
+        env:
+          OLLAMA_URL: http://localhost:11434
+
+      # ── 5. Install Trivy ─────────────────────────────────────────────────────
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
+
+      # ── 6. Security gate check ───────────────────────────────────────────────
+      - name: Run AI Security Gate
+        run: |
+          chmod +x pipeline/gate_check.sh
+          IMAGE_NAME=$IMAGE_NAME \
+          GATE_URL=$GATE_URL \
+          DOCKERFILE=./Dockerfile \
+          ./pipeline/gate_check.sh
+        # Exit code 2 (WARNING) still allows the pipeline to continue.
+        # Exit code 1 (REJECTED) will fail this step and stop the pipeline.
+
+      # ── 7. Push image (only on main, only if gate passed) ────────────────────
+      - name: Push to registry
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+          docker push $IMAGE_NAME
