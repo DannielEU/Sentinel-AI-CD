@@ -17,9 +17,11 @@ Run
 """
 
 import logging
+import os
+import secrets
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 import rule_engine
@@ -29,6 +31,9 @@ from schemas import GateDecision, ImageReport
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
+AI_DISABLED = os.getenv("AI_DISABLED", "false").lower() in {"1", "true", "yes", "on"}
+GATE_AUTH_TOKEN = os.getenv("GATE_AUTH_TOKEN")
+
 app = FastAPI(
     title="AI DevSecOps Deployment Gate",
     description=(
@@ -36,18 +41,30 @@ app = FastAPI(
         "using deterministic rules and a local Mistral LLM (via Ollama) to decide "
         "whether a deployment should be APPROVED, trigger a WARNING, or be REJECTED."
     ),
-    version="1.0.0",
+    version="1.1.0",
 )
+
+
+def _require_token(authorization: str | None) -> None:
+    if not GATE_AUTH_TOKEN:
+        return
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    provided_token = authorization.removeprefix("Bearer ").strip()
+    if not secrets.compare_digest(provided_token, GATE_AUTH_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid bearer token")
 
 
 @app.get("/", tags=["health"])
 def root():
-    return {"status": "ok", "service": "AI DevSecOps Deployment Gate"}
+    return {"status": "ok", "service": "AI DevSecOps Deployment Gate", "ai_disabled": AI_DISABLED}
 
 
 @app.get("/health", tags=["health"])
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "ai_disabled": AI_DISABLED}
 
 
 @app.post(
@@ -56,7 +73,10 @@ def health():
     tags=["gate"],
     summary="Analyse a container image security report and return a deployment decision",
 )
-async def analyze_image(report: ImageReport):
+async def analyze_image(
+    report: ImageReport,
+    authorization: str | None = Header(default=None),
+):
     """
     Receive a container-image security report from the CI/CD pipeline and
     return a gate decision.
@@ -85,6 +105,7 @@ async def analyze_image(report: ImageReport):
     }
     ```
     """
+    _require_token(authorization)
     logger.info("Received report for image: %s", report.image_name)
 
     # ── 1. Deterministic rule engine ────────────────────────────────────────
@@ -103,9 +124,23 @@ async def analyze_image(report: ImageReport):
         )
 
     # ── 2. AI model analysis (Ollama / Mistral) ──────────────────────────────
-    logger.info(
-        "No rule fired for %s — forwarding to AI model.", report.image_name
-    )
+    if AI_DISABLED:
+        logger.info(
+            "AI disabled; approving %s after deterministic checks.",
+            report.image_name,
+        )
+        return GateDecision(
+            decision="APPROVED",
+            reason="No deterministic rule fired and AI fallback is disabled for this environment.",
+            recommendations=[
+                "Keep scheduled image scanning enabled in CI.",
+                "Review warning thresholds periodically as the image evolves.",
+            ],
+            source="rule_engine",
+            image_name=report.image_name,
+        )
+
+    logger.info("No rule fired for %s - forwarding to AI model.", report.image_name)
     try:
         decision = await ollama_client.analyze(report)
         logger.info(

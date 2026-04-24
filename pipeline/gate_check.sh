@@ -39,35 +39,36 @@ if ! command -v trivy &>/dev/null; then
 fi
 
 trivy image \
-  --format json \
-  --output "$REPORT_FILE" \
-  --exit-code 0 \
-  "$IMAGE_NAME"
+--format json \
+--output "$REPORT_FILE" \
+--exit-code 0 \
+"$IMAGE_NAME"
 
 echo "      Report saved to $REPORT_FILE"
 
 # ── 2. Call the gate ─────────────────────────────────────────────────────────
 echo "[2/2] Sending report to deployment gate..."
 
-DOCKERFILE_ARG=""
+args=(
+  --report "$REPORT_FILE"
+  --image "$IMAGE_NAME"
+  --gate "$GATE_URL"
+)
+
 if [[ -f "$DOCKERFILE" ]]; then
-  DOCKERFILE_ARG="--dockerfile $DOCKERFILE"
+  args+=(--dockerfile "$DOCKERFILE")
 fi
 
-python3 "$SCRIPT_DIR/trivy_to_gate.py" \
-  --report  "$REPORT_FILE" \
-  --image   "$IMAGE_NAME" \
-  --gate    "$GATE_URL" \
-  $DOCKERFILE_ARG
-
+set +e
+python3 "$SCRIPT_DIR/trivy_to_gate.py" "${args[@]}"
 EXIT_CODE=$?
+set -e
 
 # ── 3. Interpret result ──────────────────────────────────────────────────────
 case $EXIT_CODE in
   0) echo "GATE: APPROVED — proceeding with deployment." ;;
   1) echo "GATE: REJECTED — deployment blocked."; exit 1 ;;
-  2) echo "GATE: WARNING  — proceeding with caution." ;;
-  3) echo "GATE: ERROR    — could not reach gate service."; exit 3 ;;
-esac
-
-exit $EXIT_CODE
+  2) echo "GATE: WARNING  — proceeding with caution."; exit 0;;
+  3) echo "GATE: ERROR    — could not reach gate service."; exit 3  ;;
+  *) echo "GATE: UNKNOWN RESULT - failing safely." exit 3 ;;
+ esac
