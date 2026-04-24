@@ -1,72 +1,320 @@
-name: CI/CD with AI Security Gate
+name: CI · Security Gate · Deploy
+# ─────────────────────────────────────────────────────────────────────────────
+# Plantilla de integración de Sentinel en GitHub Actions.
+# Copia este archivo a .github/workflows/ci.yml en tu proyecto y ajusta
+# las variables de entorno según tu stack.
+#
+# Sentinel repo : https://github.com/DannielEU/Sentinel-AI-CD
+# Rama          : main
+# ─────────────────────────────────────────────────────────────────────────────
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 env:
-  IMAGE_NAME: ${{ github.repository }}:${{ github.sha }}
   GATE_URL: http://localhost:8000
 
 jobs:
-  build-and-gate:
+  # ── 1. Tests + coverage ──────────────────────────────────────────────────
+  test:
+    name: Tests (>=80% coverage)
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests with coverage
+        run: python -m pytest --cov=. --cov-report=term-missing --cov-fail-under=80
 
-    services:
-      # Start Ollama sidecar
-      ollama:
-        image: ollama/ollama:latest
-        ports:
-          - 11434:11434
+  # ── 2. Security Gate — Trivy + Sentinel ─────────────────────────────────
+  security-gate:
+    name: Security Gate (Trivy + Sentinel)
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      pull-requests: write   # para publicar el comentario en la PR
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────────
-      - name: Checkout code
+      - uses: actions/checkout@v4
+
+      # Descarga Sentinel desde su rama activa
+      - name: Checkout Sentinel
         uses: actions/checkout@v4
+        with:
+          repository: DannielEU/Sentinel-AI-CD
+          ref: main
+          path: Sentinel-AI-CD
 
-      # ── 2. Build image ───────────────────────────────────────────────────────
+      # Normaliza el nombre de imagen a minúsculas (requerido por Docker)
+      - name: Set image name
+        id: vars
+        run: |
+          IMAGE=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image_name=${IMAGE}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
       - name: Build Docker image
-        run: docker build -t $IMAGE_NAME .
+        run: docker build -t ${{ steps.vars.outputs.image_name }} .
 
-      # ── 3. Pull Mistral model ────────────────────────────────────────────────
-      - name: Pull Mistral model into Ollama
-        run: |
-          sleep 5
-          curl -s http://localhost:11434/api/pull \
-            -d '{"name":"mistral"}' | tail -1
-
-      # ── 4. Start gate service ────────────────────────────────────────────────
-      - name: Start AI Deployment Gate
-        run: |
-          pip install fastapi uvicorn httpx pydantic
-          cd app && uvicorn main:app --port 8000 &
-          sleep 3
-          curl -sf http://localhost:8000/health
-        env:
-          OLLAMA_URL: http://localhost:11434
-
-      # ── 5. Install Trivy ─────────────────────────────────────────────────────
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
             | sh -s -- -b /usr/local/bin
 
-      # ── 6. Security gate check ───────────────────────────────────────────────
-      - name: Run AI Security Gate
+      # Escanea la imagen: JSON para el gate + tabla legible en el log
+      - name: Scan image with Trivy
         run: |
-          chmod +x pipeline/gate_check.sh
-          IMAGE_NAME=$IMAGE_NAME \
-          GATE_URL=$GATE_URL \
-          DOCKERFILE=./Dockerfile \
-          ./pipeline/gate_check.sh
-        # Exit code 2 (WARNING) still allows the pipeline to continue.
-        # Exit code 1 (REJECTED) will fail this step and stop the pipeline.
+          trivy image \
+            --format json \
+            --output trivy_report.json \
+            --exit-code 0 \
+            ${{ steps.vars.outputs.image_name }}
 
-      # ── 7. Push image (only on main, only if gate passed) ────────────────────
-      - name: Push to registry
-        if: github.ref == 'refs/heads/main'
+          trivy image \
+            --format table \
+            --exit-code 0 \
+            ${{ steps.vars.outputs.image_name }}
+
+      # Levanta Sentinel con Ollama desactivado (solo motor de reglas)
+      - name: Start Sentinel gate
         run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login -u "${{ secrets.REGISTRY_USER }}" --password-stdin
-          docker push $IMAGE_NAME
+          pip install fastapi uvicorn httpx pydantic --quiet
+          cd Sentinel-AI-CD/app && AI_DISABLED=true uvicorn main:app --port 8000 &
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:8000/health && break
+            sleep 2
+          done
+        env:
+          AI_DISABLED: "true"
+
+      # Llama al gate — NO hace exit 1 aquí para que el comentario y el
+      # artifact se publiquen incluso cuando la decisión es REJECTED
+      - name: Run Sentinel security gate
+        id: gate
+        run: |
+          set +e
+          python3 Sentinel-AI-CD/pipeline/trivy_to_gate.py \
+            --report trivy_report.json \
+            --image  "${{ steps.vars.outputs.image_name }}" \
+            --gate   "$GATE_URL" \
+            --dockerfile ./Dockerfile
+          GATE_EXIT=$?
+          set -e
+
+          case $GATE_EXIT in
+            0) echo "gate_decision=APPROVED" >> $GITHUB_OUTPUT
+               echo "gate_exit=0"            >> $GITHUB_OUTPUT ;;
+            2) echo "gate_decision=WARNING"  >> $GITHUB_OUTPUT
+               echo "gate_exit=2"            >> $GITHUB_OUTPUT ;;
+            1) echo "gate_decision=REJECTED" >> $GITHUB_OUTPUT
+               echo "gate_exit=1"            >> $GITHUB_OUTPUT ;;
+            *) echo "gate_decision=ERROR"    >> $GITHUB_OUTPUT
+               echo "gate_exit=$GATE_EXIT"   >> $GITHUB_OUTPUT ;;
+          esac
+
+      # Genera el comentario de PR y el reporte de artifact — siempre,
+      # incluso cuando el gate rechaza el despliegue
+      - name: Build security report
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json, os, datetime
+          from collections import Counter
+
+          decision   = os.environ.get("GATE_DECISION", "UNKNOWN")
+          image_name = os.environ.get("IMAGE_NAME", "-")
+
+          try:
+              with open("trivy_report.json") as f:
+                  data = json.load(f)
+          except FileNotFoundError:
+              data = {}
+
+          counts      = Counter()
+          crit_high   = []
+          medium_rows = []
+
+          for result in data.get("Results", []):
+              target = result.get("Target", "")
+              for v in result.get("Vulnerabilities") or []:
+                  sev = v.get("Severity", "UNKNOWN").upper()
+                  counts[sev] += 1
+                  row = {
+                      "id":    v.get("VulnerabilityID", "-"),
+                      "sev":   sev,
+                      "pkg":   v.get("PkgName", "-"),
+                      "ver":   v.get("InstalledVersion", "-"),
+                      "fixed": v.get("FixedVersion", "—"),
+                      "title": v.get("Title", "")[:80],
+                      "target": target,
+                  }
+                  if sev in ("CRITICAL", "HIGH"):
+                      crit_high.append(row)
+                  elif sev == "MEDIUM":
+                      medium_rows.append(row)
+
+          icon = {"APPROVED": "✅", "WARNING": "⚠️", "REJECTED": "❌"}.get(decision, "❓")
+          ts   = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+          # ── Comentario de PR (conciso) ────────────────────────────────────
+          pr = [
+              f"## {icon} Sentinel Security Gate — {decision}",
+              f"_`{image_name}` · {ts} · AI: disabled (rule-engine only)_",
+              "",
+              "| Severity | Count |",
+              "|----------|-------|",
+              f"| 🔴 Critical | **{counts.get('CRITICAL', 0)}** |",
+              f"| 🟠 High     | **{counts.get('HIGH', 0)}** |",
+              f"| 🟡 Medium   | {counts.get('MEDIUM', 0)} |",
+              f"| 🔵 Low      | {counts.get('LOW', 0)} |",
+              f"| ⚪ Unknown  | {counts.get('UNKNOWN', 0)} |",
+          ]
+
+          if crit_high:
+              pr += [
+                  "",
+                  "### 🔴🟠 Critical & High — action required",
+                  "",
+                  "| CVE | Sev | Package | Installed | Fixed | Description |",
+                  "|-----|-----|---------|-----------|-------|-------------|",
+              ]
+              for r in crit_high[:25]:
+                  pr.append(
+                      f"| `{r['id']}` | {r['sev']} | `{r['pkg']}` "
+                      f"| {r['ver']} | {r['fixed']} | {r['title']} |"
+                  )
+              if len(crit_high) > 25:
+                  pr.append(f"_…and {len(crit_high)-25} more — see the artifact report._")
+
+          if decision == "REJECTED":
+              pr += [
+                  "",
+                  "> ❌ **Deployment blocked.** Fix all Critical vulnerabilities before merging.",
+                  "> Download the full artifact report from the Actions run for complete details.",
+              ]
+          elif decision == "WARNING":
+              pr += [
+                  "",
+                  "> ⚠️ Deployment allowed with warnings. Open a remediation ticket for High/Medium findings.",
+              ]
+
+          with open("pr_comment.md", "w") as f:
+              f.write("\n".join(pr))
+
+          # ── Reporte completo para artifact ────────────────────────────────
+          art = [
+              "# Sentinel Security Report",
+              "",
+              f"- **Decision:** {icon} {decision}",
+              f"- **Image:** `{image_name}`",
+              f"- **Scanned at:** {ts}",
+              f"- **AI analysis:** disabled (rule-engine only)",
+              "",
+              "## Vulnerability counts",
+              "",
+              "| Severity | Count |",
+              "|----------|-------|",
+              f"| Critical | {counts.get('CRITICAL', 0)} |",
+              f"| High     | {counts.get('HIGH', 0)} |",
+              f"| Medium   | {counts.get('MEDIUM', 0)} |",
+              f"| Low      | {counts.get('LOW', 0)} |",
+              f"| Unknown  | {counts.get('UNKNOWN', 0)} |",
+              f"| **Total**| **{sum(counts.values())}** |",
+          ]
+
+          if crit_high:
+              art += [
+                  "",
+                  "## Critical & High vulnerabilities",
+                  "",
+                  "| CVE | Severity | Package | Installed | Fixed | Target | Description |",
+                  "|-----|----------|---------|-----------|-------|--------|-------------|",
+              ]
+              for r in crit_high:
+                  art.append(
+                      f"| `{r['id']}` | {r['sev']} | `{r['pkg']}` "
+                      f"| {r['ver']} | {r['fixed']} | {r['target']} | {r['title']} |"
+                  )
+
+          if medium_rows:
+              art += [
+                  "",
+                  "## Medium vulnerabilities",
+                  "",
+                  "| CVE | Package | Installed | Fixed | Target | Description |",
+                  "|-----|---------|-----------|-------|--------|-------------|",
+              ]
+              for r in medium_rows[:50]:
+                  art.append(
+                      f"| `{r['id']}` | `{r['pkg']}` "
+                      f"| {r['ver']} | {r['fixed']} | {r['target']} | {r['title']} |"
+                  )
+              if len(medium_rows) > 50:
+                  art.append(f"_…and {len(medium_rows)-50} more medium findings._")
+
+          art += [
+              "",
+              "## Rule engine thresholds",
+              "",
+              "| Rule | Threshold | Found |",
+              "|------|-----------|-------|",
+              f"| Critical vulns | > 0 → REJECTED | {counts.get('CRITICAL',0)} |",
+              f"| High vulns     | > 10 → REJECTED / 1–10 → WARNING | {counts.get('HIGH',0)} |",
+              f"| Medium vulns   | > 30 → WARNING | {counts.get('MEDIUM',0)} |",
+          ]
+
+          with open("security_report.md", "w") as f:
+              f.write("\n".join(art))
+          EOF
+        env:
+          GATE_DECISION: ${{ steps.gate.outputs.gate_decision }}
+          IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
+
+      # Publica el comentario en la PR — siempre, incluso en REJECTED
+      - name: Post security summary on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: pr_comment.md
+
+      # Sube el reporte completo como artifact (30 días de retención)
+      - name: Upload security report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-security-report
+          path: |
+            security_report.md
+            trivy_report.json
+          retention-days: 30
+
+      # Falla el job AHORA si el gate rechazó — después de comentario y artifact
+      - name: Enforce gate decision
+        if: always()
+        run: |
+          EXIT="${{ steps.gate.outputs.gate_exit }}"
+          if [ "$EXIT" = "1" ]; then
+            echo "❌ Gate decision: REJECTED — deployment blocked."
+            exit 1
+          fi
+          if [ "$EXIT" = "3" ] || [ -z "$EXIT" ]; then
+            echo "❌ Gate error — failing safely."
+            exit 1
+          fi
+          echo "✅ Gate decision: ${{ steps.gate.outputs.gate_decision }} — continuing."
+
+  # ── 3. Deploy — solo main, solo si ambos jobs pasaron ───────────────────
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: [test, security-gate]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      # Ajusta este step según tu plataforma de despliegue
+      - name: Trigger deploy
+        run: echo "Deploy step — configure for your platform (Render, Railway, Fly.io, etc.)"
