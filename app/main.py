@@ -295,10 +295,19 @@ async def analyze_image(
                 )
                 if ai_generated_summary:
                     ai_summary = ai_generated_summary
-                    logger.info("AI enriched summary for %s", report.image_name)
+                    logger.info("AI enriched summary for %s (Ollama responded successfully)", report.image_name)
+                else:
+                    logger.warning(
+                        "Ollama did not return a summary for %s — using rule engine fallback",
+                        report.image_name,
+                    )
             except Exception as exc:
-                logger.debug("AI summary generation failed for %s: %s", report.image_name, exc)
-                # fallback to rule_result.summary
+                logger.warning(
+                    "AI summary generation failed for %s (continuing with fallback): %s",
+                    report.image_name,
+                    exc,
+                )
+                # Service continues — using rule_result.summary as fallback
 
         return GateDecision(
             decision=rule_result.decision,

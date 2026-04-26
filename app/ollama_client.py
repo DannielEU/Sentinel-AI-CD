@@ -4,11 +4,14 @@ local Ollama API to obtain an AI-powered gate decision.
 """
 
 import json
+import logging
 import os
 import re
 import httpx
 
 from schemas import ImageReport, GateDecision
+
+logger = logging.getLogger(__name__)
 
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -169,7 +172,10 @@ async def generate_summary(report: ImageReport, decision: str, reason: str) -> s
     """Call Ollama to generate a contextual summary for a WARNING decision from rule engine.
 
     Returns the AI-generated summary text, or None if Ollama fails or is unavailable.
-    Non-blocking: failures do not raise exceptions.
+    Non-blocking: failures do not raise exceptions and are logged as warnings.
+
+    Timeout: 30 seconds (Ollama may need time for inference)
+    Retry: None (fail-fast to not block the pipeline)
     """
     prompt = (
         f"You are a DevSecOps assistant reviewing a container security gate decision.\n\n"
@@ -196,7 +202,7 @@ async def generate_summary(report: ImageReport, decision: str, reason: str) -> s
             },
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{OLLAMA_BASE_URL}/api/generate",
                 json=payload,
@@ -205,9 +211,46 @@ async def generate_summary(report: ImageReport, decision: str, reason: str) -> s
 
         ollama_data = response.json()
         text = ollama_data.get("response", "").strip()
-        return text if text else None
+        if text:
+            logger.debug("Ollama summary generated successfully for %s", report.image_name)
+            return text
+        else:
+            logger.warning(
+                "Ollama returned empty response for summary of %s — using fallback",
+                report.image_name,
+            )
+            return None
 
-    except Exception:
+    except httpx.TimeoutException:
+        logger.warning(
+            "Ollama timeout (30s exceeded) while generating summary for %s — Ollama may be busy or unresponsive",
+            report.image_name,
+        )
+        return None
+
+    except httpx.ConnectError:
+        logger.warning(
+            "Cannot reach Ollama at %s while generating summary for %s — service unavailable",
+            OLLAMA_BASE_URL,
+            report.image_name,
+        )
+        return None
+
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "Ollama HTTP error %s while generating summary for %s: %s",
+            exc.response.status_code,
+            report.image_name,
+            exc.response.text[:200],
+        )
+        return None
+
+    except Exception as exc:
+        logger.warning(
+            "Unexpected error generating summary for %s: %s — using fallback",
+            report.image_name,
+            exc,
+        )
         return None
 
 
