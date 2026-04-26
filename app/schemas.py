@@ -12,6 +12,15 @@ class VulnerabilityCounts(BaseModel):
     unknown: int = Field(default=0, ge=0, le=10000, description="Unknown severity vulnerabilities")
 
 
+class HighVulnerabilityDetail(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    id: str = Field(..., max_length=50, description="CVE ID or vulnerability identifier")
+    package: str = Field(..., max_length=255, description="Package name")
+    title: str = Field(..., max_length=500, description="Vulnerability title")
+    description: Optional[str] = Field(default=None, max_length=1000, description="Vulnerability description (first 300 chars)")
+
+
 class ImageReport(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -22,6 +31,9 @@ class ImageReport(BaseModel):
     scanner_output: Optional[str] = Field(default=None, max_length=100000, description="Raw output from the security scanner (max 100KB)")
     base_image: Optional[str] = Field(default=None, max_length=255, description="Base image used in FROM instruction")
     os_family: Optional[str] = Field(default=None, max_length=100, description="OS family inside the image")
+    high_vulnerabilities_details: Optional[list[HighVulnerabilityDetail]] = Field(
+        default=None, max_length=10, description="Details of HIGH severity vulnerabilities (max 10) for AI enrichment"
+    )
 
     @field_validator('image_name')
     @classmethod
