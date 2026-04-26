@@ -122,9 +122,9 @@ def call_gate(gate_url: str, payload: dict) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    # Must exceed gate-side Ollama timeout (REQUEST_TIMEOUT=300s in ollama_client.py)
+    # Must exceed gate-side Ollama timeout (REQUEST_TIMEOUT=1800s in ollama_client.py)
     # so the client doesn't drop the connection while the model is still inferring.
-    with urllib.request.urlopen(req, timeout=330) as resp:
+    with urllib.request.urlopen(req, timeout=1830) as resp:
         return json.loads(resp.read())
 
 

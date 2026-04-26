@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "neural-chat")
-REQUEST_TIMEOUT = 300  # seconds (5 min) — neural-chat needs time for inference on first run
+REQUEST_TIMEOUT = 1800  # seconds (30 min) — neural-chat can need a long first inference on CPU
 
 
 def _build_prompt(report: ImageReport) -> str:
