@@ -1,0 +1,2 @@
+.env
+trivy_report*.json

@@ -1,0 +1,112 @@
+# Sentinel-AI-CD — Docker Compose LOCAL
+# ======================================
+# Uso exclusivo para pruebas en máquina local.
+# Para producción/CD usa el docker-compose.yml de la raíz del proyecto.
+#
+# Servicios incluidos:
+#   ollama   — LLM local (IA)
+#   gate     — API FastAPI de Sentinel
+#   db       — PostgreSQL (activar con: --profile postgres)
+#
+# Inicio rápido:
+#   cp .env.example .env
+#   docker compose up -d
+#   docker exec sentinel-local-ollama ollama pull mistral
+#
+# Con PostgreSQL:
+#   docker compose --profile postgres up -d
+#
+# Ver logs:
+#   docker compose logs -f gate
+
+services:
+
+  # ── Ollama — LLM Local ────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sentinel-local-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=10m
+
+  # ── Sentinel Gate — FastAPI ───────────────────────────────────────────────
+  gate:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    container_name: sentinel-local-gate
+    restart: unless-stopped
+    ports:
+      - "${GATE_PORT:-8000}:8000"
+    volumes:
+      - sentinel-data:/app/data
+    environment:
+      # ── IA ────────────────────────────────────────────────────────────────
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+
+      # ── Base de datos ─────────────────────────────────────────────────────
+      # SQLite (default, sin servicios extra):
+      #   sqlite+aiosqlite:///./data/sentinel.db
+      # PostgreSQL (requiere --profile postgres):
+      #   postgresql+asyncpg://sentinel:sentinel@db:5432/sentinel
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/sentinel.db}
+
+      # ── Auth y seguridad ──────────────────────────────────────────────────
+      - GATE_AUTH_TOKEN=${GATE_AUTH_TOKEN:-}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-200}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      - AUTH_FAILURE_LIMIT=${AUTH_FAILURE_LIMIT:-10}
+      - AUTH_FAILURE_WINDOW=${AUTH_FAILURE_WINDOW:-300}
+
+      # ── Umbrales del motor de reglas ──────────────────────────────────────
+      - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-1200}
+      - MAX_HIGH_VULNS=${MAX_HIGH_VULNS:-10}
+      - MAX_MEDIUM_VULNS=${MAX_MEDIUM_VULNS:-30}
+
+    depends_on:
+      - ollama
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:8000/health', timeout=4); sys.exit(0 if r.status == 200 else 1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── PostgreSQL — Base de datos persistente (opcional) ─────────────────────
+  # Activar con: docker compose --profile postgres up -d
+  # Luego cambiar DATABASE_URL en .env a:
+  #   postgresql+asyncpg://sentinel:sentinel@db:5432/sentinel
+  db:
+    image: postgres:16-alpine
+    container_name: sentinel-local-db
+    profiles: [postgres]
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-sentinel}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-sentinel}
+      - POSTGRES_DB=${POSTGRES_DB:-sentinel}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ollama-data:
+  sentinel-data:
+  postgres-data:
