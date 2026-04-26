@@ -159,6 +159,10 @@ def _parse_response(raw: str) -> dict:
     if data["decision"] not in {"APPROVED", "WARNING", "REJECTED"}:
         data["decision"] = "WARNING"
 
+    # Ensure reason exists and respects pydantic max_length=500
+    reason = data.get("reason") or "AI model returned no reason field."
+    data["reason"] = str(reason)[:500]
+
     # Ensure recommendations is a list of strings
     recs = data.get("recommendations", [])
     if not isinstance(recs, list):
@@ -298,12 +302,15 @@ async def analyze(report: ImageReport) -> GateDecision:
         logger.info("Parsed decision: %s", parsed.get("decision"))
 
         return GateDecision(
-            decision=parsed["decision"],
-            reason=parsed["reason"],
+            decision=parsed.get("decision", "WARNING"),
+            reason=parsed.get("reason", "AI model response missing reason field."),
             recommendations=parsed.get("recommendations", []),
             source="ai_model",
             image_name=report.image_name,
         )
     except Exception as e:
-        logger.exception("Error during AI analysis of %s: %s", report.image_name, str(e))
-        raise
+        # Always carry a non-empty message so the gate's HTTPException(detail=str(exc))
+        # never serializes as `{"detail":""}` and CI logs surface the real cause.
+        msg = str(e) or f"{type(e).__name__} (no message)"
+        logger.exception("Error during AI analysis of %s: %s", report.image_name, msg)
+        raise RuntimeError(f"AI analysis failed: {msg}") from e

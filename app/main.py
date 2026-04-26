@@ -383,7 +383,8 @@ async def analyze_image(
         )
     except Exception as exc:
         logger.exception("Unexpected error during AI analysis")
-        raise HTTPException(status_code=500, detail=str(exc))
+        detail = str(exc) or f"{type(exc).__name__} (no message available)"
+        raise HTTPException(status_code=500, detail=detail)
 
 
 # ── Global exception handler ────────────────────────────────────────────────

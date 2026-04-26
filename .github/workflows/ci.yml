@@ -311,6 +311,16 @@ jobs:
                   echo "Curl stderr:"
                   cat /tmp/curl_error.log
                 fi
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "🐳 GATE CONTAINER LOGS (last 80 lines):"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                docker compose logs gate --tail=80 || true
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "🐳 OLLAMA CONTAINER LOGS (last 40 lines):"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                docker compose logs ollama --tail=40 || true
                 exit 1
               elif [ "$SOURCE" = "ai_model" ]; then
                 echo "  ✅ Gate consulted Ollama (source: ai_model) — decision: $DECISION"
