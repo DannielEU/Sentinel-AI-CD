@@ -165,6 +165,52 @@ def _parse_response(raw: str) -> dict:
     return data
 
 
+async def generate_summary(report: ImageReport, decision: str, reason: str) -> str | None:
+    """Call Ollama to generate a contextual summary for a WARNING decision from rule engine.
+
+    Returns the AI-generated summary text, or None if Ollama fails or is unavailable.
+    Non-blocking: failures do not raise exceptions.
+    """
+    prompt = (
+        f"You are a DevSecOps assistant reviewing a container security gate decision.\n\n"
+        f"Image: {report.image_name}\n"
+        f"Decision: {decision}\n"
+        f"Reason: {reason}\n"
+        f"Vulnerabilities: critical={report.vulnerabilities.critical}, "
+        f"high={report.vulnerabilities.high}, medium={report.vulnerabilities.medium}\n"
+        f"Base image: {report.base_image or 'unknown'}\n"
+        f"Image size: {report.image_size_mb:.1f} MB\n\n"
+        f"Write a 2-3 sentence professional summary for the development team explaining "
+        f"the security implications and recommended next steps. Be specific, concise, and actionable. "
+        f"Respond with plain text only—no JSON, no markdown, no extra formatting."
+    )
+
+    try:
+        payload = {
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.3,
+                "num_predict": 150,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json=payload,
+            )
+            response.raise_for_status()
+
+        ollama_data = response.json()
+        text = ollama_data.get("response", "").strip()
+        return text if text else None
+
+    except Exception:
+        return None
+
+
 async def analyze(report: ImageReport) -> GateDecision:
     """Send *report* to Ollama and return a :class:`GateDecision`."""
     prompt = _build_prompt(report)

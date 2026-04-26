@@ -44,10 +44,11 @@ EXIT_ERROR    = 3
 
 def parse_trivy_report(path: Path) -> dict:
     """Return a dict with keys: critical, high, medium, low, unknown,
-    os_family, scanner_output (truncated raw JSON)."""
+    os_family, scanner_output (truncated raw JSON), high_vulnerabilities_details."""
     data = json.loads(path.read_text())
     counts: Counter = Counter()
     os_family: str | None = None
+    high_vulns_details = []
 
     for result in data.get("Results", []):
         # OS family is sometimes in the Type field
@@ -59,6 +60,20 @@ def parse_trivy_report(path: Path) -> dict:
             sev = vuln.get("Severity", "UNKNOWN").upper()
             counts[sev] += 1
 
+            # Extract details of HIGH severity vulnerabilities for AI enrichment
+            if sev == "HIGH" and len(high_vulns_details) < 10:
+                pkg_name = vuln.get("PkgName", "")
+                if not pkg_name:
+                    pkg_name = result.get("Target", "unknown")
+
+                vuln_detail = {
+                    "id": vuln.get("VulnerabilityID", ""),
+                    "package": pkg_name,
+                    "title": vuln.get("Title", ""),
+                    "description": (vuln.get("Description", "")[:300] if vuln.get("Description") else None),
+                }
+                high_vulns_details.append(vuln_detail)
+
     return {
         "critical": counts.get("CRITICAL", 0),
         "high":     counts.get("HIGH", 0),
@@ -67,6 +82,7 @@ def parse_trivy_report(path: Path) -> dict:
         "unknown":  counts.get("UNKNOWN", 0),
         "os_family": os_family,
         "scanner_output": json.dumps(data)[:4000],
+        "high_vulnerabilities_details": high_vulns_details,
     }
 
 
@@ -117,18 +133,29 @@ def print_result(result: dict) -> None:
     icons = {"APPROVED": "✅", "WARNING": "⚠️ ", "REJECTED": "❌"}
     icon = icons.get(decision, "❓")
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print(f"  {icon}  GATE DECISION: {decision}")
-    print("=" * 60)
+    print("=" * 70)
     print(f"  Image  : {result.get('image_name', '-')}")
     print(f"  Source : {result.get('source', '-')}")
     print(f"  Reason : {result.get('reason', '-')}")
+
     recs = result.get("recommendations", [])
     if recs:
-        print("\n  Recommendations:")
-        for r in recs:
-            print(f"    • {r}")
-    print("=" * 60 + "\n")
+        print("\n  Action Items:")
+        for i, r in enumerate(recs, 1):
+            # Better formatting for specific vulnerability recommendations
+            if "CVE" in r or "package" in r.lower() or "Update" in r:
+                print(f"    [{i}] {r}")
+            else:
+                print(f"    • {r}")
+
+    summary = result.get("summary")
+    if summary:
+        print("\n  Summary:")
+        print(f"    {summary}")
+
+    print("=" * 70 + "\n")
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -175,6 +202,10 @@ def main() -> int:
 
     if trivy["os_family"]:
         payload["os_family"] = trivy["os_family"]
+
+    # Include HIGH vulnerability details for specific recommendations
+    if trivy.get("high_vulnerabilities_details"):
+        payload["high_vulnerabilities_details"] = trivy["high_vulnerabilities_details"]
 
     base_image = extract_base_image(dockerfile_path)
     if base_image:
