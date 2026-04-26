@@ -11,7 +11,7 @@ env:
   GATE_URL: http://localhost:8000
   # AI Model Configuration
   OLLAMA_MODEL: neural-chat  # Models: neural-chat, mistral, llama2
-  AI_ENABLED: "true"          # Set to "false" to disable AI analysis (rule-engine only)
+  AI_ENABLED: "true"          # Set to "true" to enable AI analysis with Ollama; "false" for rule-engine only
   # Security Thresholds (configurable)
   MAX_IMAGE_SIZE_MB: "1200"   # Warn if image exceeds this size
   MAX_HIGH_VULNS: "10"        # Reject if HIGH vulns > this value
@@ -148,7 +148,8 @@ jobs:
           echo ""
           echo "✅ All services ready!"
         env:
-          AI_DISABLED: ${{ env.AI_ENABLED == 'true' && 'false' || 'true' }}
+          # Invert AI_ENABLED to AI_DISABLED for the app: if AI is enabled, then AI_DISABLED=false
+          AI_DISABLED: ${{ env.AI_ENABLED == 'false' && 'true' || 'false' }}
           OLLAMA_URL: http://ollama:11434
           OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
           MAX_IMAGE_SIZE_MB: ${{ env.MAX_IMAGE_SIZE_MB }}
