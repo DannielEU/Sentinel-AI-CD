@@ -38,3 +38,4 @@ logs/
 
 # Docker
 *.tar
+ollama-data/

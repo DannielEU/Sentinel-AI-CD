@@ -111,6 +111,16 @@ jobs:
             --exit-code 0 \
             ${{ steps.vars.outputs.image_name }}
 
+      # ── Restore Ollama model cache ───────────────────────────────────────────
+      - name: Restore Ollama model cache
+        id: ollama-cache
+        uses: actions/cache@v4
+        with:
+          path: Sentinel-AI-CD/ollama-data
+          key: ollama-model-${{ env.OLLAMA_MODEL }}-v1
+          restore-keys: |
+            ollama-model-${{ env.OLLAMA_MODEL }}-
+
       # ── Start Sentinel gate with docker compose ──────────────────────────────
       - name: Start Sentinel services (Ollama + Gate) via docker compose
         run: |
@@ -142,6 +152,41 @@ jobs:
             exit 1
           fi
 
+          # ── Ollama readiness check ──────────────────────────────────────
+          OLLAMA_PORT="${OLLAMA_PORT:-11435}"
+          echo "⏳ Waiting for Ollama API at http://localhost:${OLLAMA_PORT} (max 120 seconds)..."
+          OLLAMA_READY=false
+          for i in $(seq 1 40); do
+            echo "  [$i/40] Checking http://localhost:${OLLAMA_PORT}/api/tags..."
+            if curl -sf "http://localhost:${OLLAMA_PORT}/api/tags" 2>/dev/null | grep -q "models"; then
+              echo "✅ Ollama API is responding!"
+              OLLAMA_READY=true
+              break
+            fi
+            echo "       → Not ready yet, waiting 3 seconds..."
+            sleep 3
+          done
+
+          if [ "$OLLAMA_READY" = "false" ]; then
+            echo ""
+            echo "❌ ERROR: Ollama did not become ready. Ollama container logs:"
+            echo "=========================================="
+            docker compose logs ollama
+            echo "=========================================="
+            exit 1
+          fi
+
+          # ── Pull model if not already present ─────────────────────────
+          MODEL="${OLLAMA_MODEL:-neural-chat}"
+          echo "Checking if model '$MODEL' is already loaded..."
+          if curl -sf "http://localhost:${OLLAMA_PORT}/api/tags" | grep -q "\"${MODEL}"; then
+            echo "✅ Model '$MODEL' already present in cache — skipping pull."
+          else
+            echo "📥 Model '$MODEL' not found — pulling now (this may take several minutes on first run)..."
+            docker compose exec -T ollama ollama pull "${MODEL}"
+            echo "✅ Model pull complete."
+          fi
+
           echo ""
           echo "📊 Service Status:"
           docker compose ps
@@ -152,9 +197,18 @@ jobs:
           AI_DISABLED: ${{ env.AI_ENABLED == 'false' && 'true' || 'false' }}
           OLLAMA_URL: http://ollama:11434
           OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
+          OLLAMA_DATA_PATH: ${{ github.workspace }}/Sentinel-AI-CD/ollama-data
           MAX_IMAGE_SIZE_MB: ${{ env.MAX_IMAGE_SIZE_MB }}
           MAX_HIGH_VULNS: ${{ env.MAX_HIGH_VULNS }}
           MAX_MEDIUM_VULNS: ${{ env.MAX_MEDIUM_VULNS }}
+
+      # ── Save Ollama model cache (only when model was freshly pulled) ─────────
+      - name: Save Ollama model cache
+        if: steps.ollama-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: Sentinel-AI-CD/ollama-data
+          key: ollama-model-${{ env.OLLAMA_MODEL }}-v1
 
       # ── Verify gate is accessible ───────────────────────────────────────────
       - name: Verify gate connectivity

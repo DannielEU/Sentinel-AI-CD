@@ -22,7 +22,7 @@ services:
     ports:
       - "${OLLAMA_PORT:-11435}:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      - ${OLLAMA_DATA_PATH:-./ollama-data}:/root/.ollama
     environment:
       - OLLAMA_KEEP_ALIVE=5m
     # Nota: Límites de recursos configurables vía variables en Azure
@@ -68,6 +68,3 @@ services:
     # Nota: Límites de recursos para Azure configurables vía variables
     # En docker-compose local, usar: docker run --cpus=1 --memory=1g
 
-volumes:
-  ollama_data:
-    driver: local
