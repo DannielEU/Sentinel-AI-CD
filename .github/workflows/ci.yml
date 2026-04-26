@@ -204,7 +204,7 @@ jobs:
         run: |
           echo "🤖 Requesting AI analysis from gate..."
 
-          # Parse trivy report to build gate request
+          # Parse trivy report to build gate request with HIGH vuln details
           python3 << 'PYTHON_EOF'
           import json
 
@@ -212,15 +212,26 @@ jobs:
           with open('trivy_report.json') as f:
               trivy_data = json.load(f)
 
-          # Count vulnerabilities
+          # Count vulnerabilities and collect HIGH ones
           counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'unknown': 0}
+          high_vulns = []  # Store HIGH vulnerabilities for AI analysis
+
           for result in trivy_data.get('Results', []):
               for vuln in result.get('Vulnerabilities', []):
                   sev = vuln.get('Severity', 'unknown').lower()
                   if sev in counts:
                       counts[sev] += 1
 
-          # Build gate payload
+                  # Collect HIGH vulnerabilities (max 10) for AI context
+                  if sev == 'high' and len(high_vulns) < 10:
+                      high_vulns.append({
+                          "id": vuln.get('VulnerabilityID', 'N/A'),
+                          "package": vuln.get('PkgName', 'N/A'),
+                          "title": vuln.get('Title', 'No description'),
+                          "description": vuln.get('Description', '')[:300]  # First 300 chars
+                      })
+
+          # Build gate payload with vulnerability details
           payload = {
               "image_name": "${{ steps.vars.outputs.image_name }}",
               "image_size_mb": 350,
@@ -229,11 +240,16 @@ jobs:
               "os_family": "debian"
           }
 
+          # Add HIGH vulnerability details for AI enrichment
+          if high_vulns:
+              payload["high_vulnerabilities_details"] = high_vulns
+              print(f"📋 Including {len(high_vulns)} HIGH vulnerabilities for AI analysis")
+
           # Save for curl
           with open('/tmp/gate_payload.json', 'w') as f:
-              json.dump(payload, f)
+              json.dump(payload, f, indent=2)
 
-          print("✅ Gate payload prepared")
+          print("✅ Gate payload prepared with vulnerability details")
           PYTHON_EOF
 
           # Call gate and capture response
