@@ -319,7 +319,7 @@ jobs:
           echo "✅ All services ready!"
         env:
           # Invert AI_ENABLED to AI_DISABLED for the app: if AI is enabled, then AI_DISABLED=false
-          AI_DISABLED: ${{ env.AI_ENABLED == 'false' && 'true' || 'false' }}
+          AI_DISABLED: ${{ env.AI_ENABLED == 'true' && 'false' || 'true' }}
           OLLAMA_URL: http://ollama:11434
           OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
           OLLAMA_DATA_PATH: ${{ github.workspace }}/Sentinel-AI-CD/ollama-data
