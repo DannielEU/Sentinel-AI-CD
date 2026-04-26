@@ -3,3 +3,8 @@ uvicorn[standard]>=0.32.0
 httpx>=0.28.0
 pydantic>=2.10.0
 python-dotenv>=1.0.1
+
+# Database — enable by setting DATABASE_URL
+sqlalchemy[asyncio]>=2.0.0
+aiosqlite>=0.20.0
+# asyncpg>=0.30.0  # uncomment for PostgreSQL (postgresql+asyncpg://)

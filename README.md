@@ -1,794 +1,451 @@
-# Sentinel — AI DevSecOps Deployment Gate
+# Sentinel-AI-CD
 
 <div align="center">
 
-![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009485?logo=fastapi&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-24%2B-2496ED?logo=docker&logoColor=white)
-![Trivy](https://img.shields.io/badge/Trivy-0.50%2B-1DA1F2?logo=aquasecurity&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi)
 ![License](https://img.shields.io/badge/License-MIT-green)
-
-**Puerta de seguridad inteligente para pipelines CI/CD**
-
-[Instalación](#instalación) · [Documentación](#tabla-de-contenidos) · [GitHub](https://github.com/DannielEU/Sentinel-AI-CD)
+![Architecture](https://img.shields.io/badge/Architecture-Hexagonal-blueviolet)
 
 </div>
 
+Intelligent security gate for CI/CD pipelines. Analyses Docker container images and decides whether a deployment should be **APPROVED**, **WARNING**, or **REJECTED** — combining deterministic OWASP rules, Dockerfile secrets detection, a CVE whitelist, scan history, and an optional AI provider (Ollama, OpenAI, or Anthropic).
+
+```
+CI/CD pipeline
+    └─ trivy scan
+        └─ POST /analyze-image
+            ├─ Secrets detector  → REJECTED if hardcoded credentials found
+            ├─ CVE whitelist     → loaded from DB (optional)
+            ├─ Rule engine       → OWASP-aligned deterministic rules
+            └─ AI provider       → Ollama / OpenAI / Anthropic (optional)
+```
+
 ---
 
-## ¿Qué es Sentinel?
+## Features
 
-Puerta de seguridad inteligente para pipelines CI/CD. Analiza imágenes de contenedor con **Trivy**, aplica un motor de reglas determinístico alineado con **OWASP** y —opcionalmente— consulta a **Mistral vía Ollama** (o **Neural-Chat**, especializado en seguridad Docker) para decidir si un despliegue debe ser `APPROVED`, `WARNING` o `REJECTED`.
-
-**Compatible con:** Azure Container Instances · App Service · Render · Railway · Fly.io · Kubernetes · On-premise
-
----
-
-## Características clave
-
-- **Motor de reglas OWASP-aligned** — bloquea vulnerabilidades críticas, controla severidad
-- **AI contextual opcional** — Mistral/Neural-Chat analiza imágenes complejas sin enviar datos a terceros
-- **Integración trivial** — un script Python + variables de entorno en cualquier CI/CD
-- **Autenticación de token** — protege el endpoint si lo expones públicamente
-- **Rápido** — decisión inmediata en modo reglas puras (~<100ms)
-- **Sin dependencias de servicios externos** — Ollama es local, sin costos de API
+| Feature | Description |
+|---|---|
+| **Secrets detection** | Scans Dockerfiles for hardcoded API keys, passwords, tokens, private keys — auto-REJECTED |
+| **OWASP rule engine** | Deterministic: critical→REJECTED, high→WARNING/REJECTED, size/medium→WARNING |
+| **CVE whitelist** | Accept known CVEs with expiry via DB — downgrades REJECTED to WARNING |
+| **Scan history** | Every decision persisted in DB; trend tracking per image (IMPROVING/WORSENING/STABLE) |
+| **Dashboard** | HTML security dashboard at `/dashboard` and `/dashboard/{image}` |
+| **Multi-AI provider** | Ollama (local, free), OpenAI GPT-4o-mini, Anthropic Claude — swappable via env var |
+| **No-DB mode** | Works without a database — history and whitelist simply disabled, logs clearly say so |
+| **Hexagonal architecture** | Domain / Application / Infrastructure / Web layers, fully decoupled |
+| **Auth + rate limiting** | Bearer token, SHA-256 constant-time comparison, 100 req/min, auth-failure backoff |
 
 ---
 
 ## Quick Start
 
+### With Docker Compose (Ollama + SQLite)
+
 ```bash
-# 1. Clonar y levantar con Docker Compose
-git clone https://github.com/DannielEU/Sentinel-AI-CD.git
+git clone <repo>
 cd Sentinel-AI-CD
 docker compose up -d
 
-# 2. Escanear una imagen
-docker build -t miapp:1.0.0 .
-trivy image --format json --output report.json miapp:1.0.0
+# Check status
+curl http://localhost:8000/health
+# → {"status":"ok","db_enabled":true}
 
-# 3. Enviar al gate
-python pipeline/trivy_to_gate.py \
-  --report report.json \
-  --image miapp:1.0.0 \
-  --dockerfile ./Dockerfile
-
-# Resultado: APPROVED | WARNING | REJECTED
+# Open dashboard
+open http://localhost:8000/dashboard
 ```
 
-**APIs disponibles:** 
-- Swagger: http://localhost:8000/docs
-- Gate: http://localhost:8000/analyze-image (POST)
-- Health: http://localhost:8000/health (GET)
-
----
-
-## Tabla de contenidos
-
-1. [Características clave](#características-clave)
-2. [Tecnología](#tecnología)
-3. [Instalación](#instalación)
-4. [Configuración](#configuración)
-5. [Flujo del pipeline](#flujo-del-pipeline)
-6. [Motor de reglas (OWASP)](#motor-de-reglas-owasp)
-7. [API Reference](#api-reference)
-8. [Manual de usuario](#manual-de-usuario)
-9. [Despliegue](#despliegue)
-10. [GitHub Actions](#ejemplo-completo-de-github-actions)
-11. [Troubleshooting](#troubleshooting)
-
----
-
-## Tecnología
-
-| Componente | Tecnología | Versión mínima |
-|---|---|---|
-| API Gateway | [FastAPI](https://fastapi.tiangolo.com/) | 0.111 |
-| Servidor ASGI | [Uvicorn](https://www.uvicorn.org/) | 0.29 |
-| Validación de datos | [Pydantic v2](https://docs.pydantic.dev/) | 2.7 |
-| Cliente HTTP | [HTTPX](https://www.python-httpx.org/) | 0.27 |
-| Escáner de vulnerabilidades | [Trivy](https://trivy.dev/) (Aqua Security) | 0.50 |
-| Modelo de lenguaje local | [Neural-Chat](https://huggingface.co/Intel/neural-chat-7b) o [Mistral 7B](https://mistral.ai/) via [Ollama](https://ollama.com/) | 0.1.x |
-| Contenedores | Docker + Docker Compose | 24.x |
-| Runtime | Python | 3.11 |
-| Nube | Azure Container Instances, App Service, on-premise | - |
-
-### ¿Por qué estas tecnologías?
-
-- **FastAPI** — tipado estricto, documentación automática (Swagger/OpenAPI), rendimiento asíncrono nativo.
-- **Trivy** — escáner open-source líder del sector, soporta imágenes OCI, filesystems, repos y SBOMs.
-- **Ollama + Neural-Chat** — LLM local, sin enviar datos a terceros, sin costos de API. Neural-Chat está optimizado para análisis técnico y seguridad Docker (mejor que Mistral para este caso de uso).
-- **Pydantic v2** — validación de entrada con errores claros; evita que reportes malformados lleguen al motor.
-
----
-
-## Instalación
-
-### Requisitos previos
+### Local Python (no DB, no AI — fastest for testing)
 
 ```bash
-# Verificar versiones
-python --version      # >= 3.11
-docker --version      # >= 24.x
-docker compose version # >= 2.x
-
-# Instalar Trivy (Linux/macOS)
-curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-  | sh -s -- -b /usr/local/bin
-
-# Instalar Ollama (solo si usas AI_DISABLED=false)
-# https://ollama.com/download
-ollama pull mistral
-```
-
-### Opción A — Docker Compose (recomendado para desarrollo)
-
-Levanta Sentinel + Ollama con un solo comando. Ollama descarga Mistral automáticamente (~4 GB la primera vez).
-
-```bash
-git clone https://github.com/DannielEU/Sentinel-AI-CD.git
-cd Sentinel-AI-CD
-```
-
-| Servicio | URL |
-|---|---|
-| Sentinel API | http://localhost:8000 |
-| Swagger UI | http://localhost:8000/docs |
-| Ollama | http://localhost:11434 |
-
-### Opción B — Ejecución local sin Docker
-
-```bash
-git clone https://github.com/DannielEU/Sentinel-AI-CD.git
-cd Sentinel-AI-CD
-python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
-
-# 2. Instalar dependencias
 pip install -r requirements.txt
 
-# 3. (Opcional) Iniciar Ollama
-ollama serve &
-ollama pull mistral
-
-# 4. Iniciar Sentinel
-cd app
-uvicorn main:app --reload --port 8000
+AI_PROVIDER=disabled uvicorn web.main:app --port 8000
 ```
 
-### Opción C — Solo el gate (sin Ollama, modo reglas)
-
-Útil en CI/CD donde no hay GPU ni recursos para un LLM.
+### Scan an image
 
 ```bash
-cd app
-AI_DISABLED=true uvicorn main:app --port 8000
-```
+# 1. Scan with Trivy
+trivy image --format json -o report.json myapp:1.2.3
 
-Con `AI_DISABLED=true` el servicio aplica únicamente el motor de reglas determinístico. Si ninguna regla se activa, devuelve `APPROVED` directamente sin llamar a Ollama.
+# 2. Send to gate (pass Dockerfile to enable secrets detection)
+python pipeline/trivy_to_gate.py \
+    --report     report.json \
+    --image      myapp:1.2.3 \
+    --gate       http://localhost:8000 \
+    --dockerfile ./Dockerfile
+```
 
 ---
 
-## Configuración
+## Configuration
 
-### Variables de entorno
+All settings are environment variables.
 
-| Variable | Default | Descripción |
+### AI Provider
+
+| Variable | Default | Description |
 |---|---|---|
-| `OLLAMA_URL` | `http://localhost:11434` | URL base del servidor Ollama |
-| `AI_DISABLED` | `false` | `true` desactiva Ollama; solo se usa el motor de reglas |
-| `GATE_AUTH_TOKEN` | _(vacío)_ | Si se define, todos los requests deben incluir `Authorization: Bearer <token>` |
+| `AI_PROVIDER` | `ollama` | `ollama` \| `openai` \| `anthropic` \| `disabled` |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `neural-chat` | Ollama model name |
+| `OPENAI_API_KEY` | — | Required when `AI_PROVIDER=openai` |
+| `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model |
+| `ANTHROPIC_API_KEY` | — | Required when `AI_PROVIDER=anthropic` |
+| `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | Anthropic model |
 
-### Umbrales del motor de reglas
+The factory detects the provider **at startup**, before any model pull or external API call. Missing credentials for cloud providers cause an immediate startup error with a clear message.
 
-Edita `app/rule_engine.py`:
+### Database
 
-```python
-MAX_IMAGE_SIZE_MB  = 1200   # MB — WARNING si se supera
-MAX_HIGH_VULNS     = 10     # REJECTED si high > este valor; WARNING si high >= 1
-MAX_MEDIUM_VULNS   = 30     # WARNING si se supera
-```
-
-### Autenticación (opcional)
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `sqlite+aiosqlite:///./data/sentinel.db` | DB connection. Leave empty to disable. |
 
 ```bash
-# Generar un token seguro
-python -c "import secrets; print(secrets.token_hex(32))"
+# SQLite (default in docker-compose)
+DATABASE_URL=sqlite+aiosqlite:///./data/sentinel.db
 
-# Exportar antes de iniciar el servicio
-export GATE_AUTH_TOKEN=tu_token_aqui
-uvicorn main:app --port 8000
-
-# Llamar al gate con el token
-curl -H "Authorization: Bearer tu_token_aqui" \
-     -X POST http://localhost:8000/analyze-image \
-     -d @payload.json
+# PostgreSQL
+DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
 ```
+
+When `DATABASE_URL` is empty, the gate runs without persistence — history and whitelist are disabled, clearly logged at startup:
+
+```
+INFO | Database: not configured (DATABASE_URL not set) — history and whitelist disabled
+INFO | Mode: rules + AI only, no persistence
+```
+
+### Rule Engine Thresholds
+
+| Variable | Default | Trigger |
+|---|---|---|
+| `MAX_IMAGE_SIZE_MB` | `1200` | WARNING if image > N MB |
+| `MAX_HIGH_VULNS` | `10` | REJECTED if HIGH > N |
+| `MAX_MEDIUM_VULNS` | `30` | WARNING if MEDIUM > N |
+
+### Auth & Security
+
+| Variable | Default | Description |
+|---|---|---|
+| `GATE_AUTH_TOKEN` | — | Bearer token (optional) |
+| `RATE_LIMIT_REQUESTS` | `100` | Max requests per window |
+| `RATE_LIMIT_WINDOW` | `60` | Window in seconds |
+| `AUTH_FAILURE_LIMIT` | `5` | Max failed auth attempts before lockout |
+| `AUTH_FAILURE_WINDOW` | `300` | Auth failure window (s) |
 
 ---
 
-## Flujo del pipeline
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                         CI/CD PIPELINE                           │
-│                                                                  │
-│  1. git push / pull_request                                      │
-│  2. docker build -t myapp:sha .                                  │
-│  3. trivy image --format json -o report.json myapp:sha           │
-│  4. python trivy_to_gate.py --report report.json --image myapp   │
-│                      │                                           │
-│            POST /analyze-image                                   │
-│                      │                                           │
-│         ┌────────────▼────────────┐                              │
-│         │      Rule Engine        │                              │
-│         │   (determinístico)      │                              │
-│         └────────────┬────────────┘                              │
-│              fires?  │  no fires                                 │
-│            ┌─────────┴──────────┐                                │
-│            │                    ▼                                │
-│       decisión            Ollama / Mistral                       │
-│       inmediata          (AI_DISABLED=false)                     │
-│            │                    │                                │
-│            └──────────┬─────────┘                                │
-│                       ▼                                          │
-│          { decision, reason, recommendations }                   │
-│                       │                                          │
-│          ┌────────────┼────────────┐                             │
-│       exit 0       exit 2       exit 1                           │
-│      APPROVED      WARNING     REJECTED                          │
-│     continúa     continúa+log  pipeline falla                    │
-│     deploy        deploy       deploy bloqueado                  │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Lógica interna del gate
+## Decision Pipeline
 
 ```
 POST /analyze-image
         │
         ▼
-   Rule Engine
-   ├─ critical > 0          ──► REJECTED
-   ├─ high > 10             ──► REJECTED
-   ├─ high 1..10            ──► WARNING
-   ├─ size_mb > 1200        ──► WARNING
-   └─ medium > 30           ──► WARNING
-        │
-    no rule fires
+1. Dockerfile secrets scan
+   └─ Any found? → REJECTED (source: secrets_detector) → persist → return
+        │ none
+        ▼
+2. Load CVE whitelist from DB (if DATABASE_URL is set)
         │
         ▼
-   AI_DISABLED=true?
-   ├─ sí  ──► APPROVED (rule-engine fallback)
-   └─ no  ──► Ollama / Mistral ──► GateDecision
+3. Deterministic rule engine
+   ├── Critical > 0          → REJECTED (hard stop, AI cannot override)
+   ├── High > MAX_HIGH_VULNS → REJECTED (unless whitelisted CVEs reduce count below threshold)
+   ├── High 1..MAX           → WARNING  → delegate to AI (if enabled)
+   ├── Size > MAX_SIZE_MB    → WARNING  → delegate to AI
+   ├── Medium > MAX_MEDIUM   → WARNING  → delegate to AI
+   └── No rule fires         → AI analysis or APPROVED (if AI disabled)
+        │
+        ▼
+4. AI provider (Ollama / OpenAI / Anthropic)
+   └─ Can confirm WARNING, escalate to REJECTED, or downgrade to APPROVED
+        │
+        ▼
+5. Persist ScanRecord to DB (if available)
+        │
+        ▼
+6. Return GateDecision + dashboard_url (if DB enabled)
 ```
 
 ---
 
-## Motor de reglas (OWASP)
+## Secrets Detection
 
-Las reglas implementadas están alineadas con las guías de **OWASP Docker Security** y **OWASP Top 10 CI/CD Security Risks**:
+The gate scans the `dockerfile_content` field for hardcoded credentials **before any other check**. An immediate `REJECTED` with `source=secrets_detector` is returned — no AI is consulted.
 
-| Regla | Condición | Decisión | Referencia OWASP |
-|---|---|---|---|
-| Vulnerabilidades críticas | `critical > 0` | `REJECTED` | CICD-SEC-4: Poisoned Pipeline Execution |
-| Exceso de vulns altas | `high > 10` | `REJECTED` | CICD-SEC-6: Insufficient Credential Hygiene |
-| Vulns altas moderadas | `high 1..10` | `WARNING` | OWASP Docker Top 10: D02 |
-| Imagen sobredimensionada | `size_mb > 1200` | `WARNING` | OWASP Docker Top 10: D06 |
-| Exceso de vulns medias | `medium > 30` | `WARNING` | CICD-SEC-4 |
-| Sin regla activa | — | → AI model | — |
+| Pattern | Example match |
+|---|---|
+| AWS Access Key ID | `AKIA0123456789ABCDEF` |
+| AWS Secret Key | `aws_secret_access_key=abc123...` |
+| OpenAI API Key | `sk-` + 48 alphanumeric chars |
+| GitHub Token | `ghp_` + 36 chars |
+| GitLab Token | `glpat-...` |
+| Private Keys | `-----BEGIN RSA PRIVATE KEY-----` |
+| Hardcoded Passwords | `password=mysecretpassword` |
+| Hardcoded API Keys | `api_key=abcdef012345678901234` |
+| Auth Tokens | `auth_token=...` (20+ chars) |
 
-### OWASP CI/CD Security Risks cubiertos
+Comment lines (`#`) are excluded from scanning.
 
-- **CICD-SEC-1** (Insufficient Flow Control) — el gate bloquea el pipeline ante REJECTED, impidiendo despliegues no autorizados.
-- **CICD-SEC-4** (Poisoned Pipeline Execution) — Trivy detecta dependencias comprometidas antes del despliegue.
-- **CICD-SEC-6** (Insufficient Credential Hygiene) — el token de autenticación opcional protege el endpoint del gate.
-- **CICD-SEC-8** (Ungoverned Usage of 3rd Party Services) — todas las dependencias se escanean antes de llegar a producción.
+**Always pass `--dockerfile ./Dockerfile`** to `trivy_to_gate.py` to enable this check.
 
 ---
 
-## Detección estática (SAST)
+## CVE Whitelist
 
-Sentinel puede complementarse con herramientas de análisis estático de código fuente antes del escaneo de imagen. Se recomienda añadir los siguientes pasos al pipeline **antes** del `docker build`:
-
-### Bandit — análisis de seguridad Python
+Accept known CVEs — for example when no patch is available — with a reason and optional expiry date:
 
 ```bash
-pip install bandit
-bandit -r . -ll -ii --exit-zero
-# -ll  → solo severidad MEDIUM o superior
-# -ii  → solo confianza MEDIUM o superior
+# Add an exception
+curl -X POST http://localhost:8000/exceptions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cve_id": "CVE-2023-1234",
+    "reason": "No fix available; mitigated at runtime via WAF rule",
+    "approved_by": "security-team",
+    "expires_at": "2025-12-31T00:00:00"
+  }'
+
+# List active exceptions
+curl http://localhost:8000/exceptions
+
+# Deactivate an exception
+curl -X DELETE http://localhost:8000/exceptions/CVE-2023-1234
 ```
 
-### Semgrep — reglas OWASP y CWE
+Whitelisted CVEs are loaded per-request from the DB. If the whitelist reduces the effective HIGH count below `MAX_HIGH_VULNS`, the decision is downgraded from REJECTED to WARNING with an audit note listing which CVEs were accepted.
 
-```bash
-pip install semgrep
-semgrep --config=p/owasp-top-ten --config=p/python .
+---
+
+## Dashboard
+
+| Endpoint | Description |
+|---|---|
+| `GET /dashboard` | Overall view — recent scans across all images |
+| `GET /dashboard/{image_name}` | Per-image history with trend badge |
+
+The dashboard shows:
+- Scan history table (timestamp, decision, C/H/M counts, source, reason)
+- Trend badge: **IMPROVING ↓** / **STABLE →** / **WORSENING ↑** (based on vulnerability score over time)
+- Active whitelist entries
+
+When `dashboard_url` is returned in the gate response, `trivy_to_gate.py` prints it and emits a machine-readable marker for CI scripts:
+
+```
+  Dashboard  : http://gate:8000/dashboard/myapp:1.2.3
+
+::sentinel-dashboard::http://gate:8000/dashboard/myapp:1.2.3
 ```
 
-### Integración en GitHub Actions
+---
+
+## CI/CD Integration
+
+### Exit Codes
+
+| Code | Meaning | Recommended pipeline action |
+|---|---|---|
+| `0` | APPROVED | Deploy normally |
+| `1` | REJECTED | Abort deployment — fix vulnerabilities or secrets |
+| `2` | WARNING | Deploy with caution, create remediation ticket |
+| `3` | Error | Gate unreachable — fail safe (block) |
+
+### GitHub Actions
 
 ```yaml
-- name: SAST — Bandit
-  run: |
-    pip install bandit
-    bandit -r . -ll -ii -f json -o bandit_report.json || true
+name: CI/CD with Sentinel Security Gate
 
-- name: SAST — Semgrep
-  uses: returntocorp/semgrep-action@v1
-  with:
-    config: >-
-      p/owasp-top-ten
-      p/python
-      p/secrets
+on: [push, pull_request]
+
+jobs:
+  security-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t ${{ github.repository }}:${{ github.sha }} .
+
+      - name: Scan with Trivy
+        run: |
+          trivy image --format json \
+            -o trivy_report.json \
+            ${{ github.repository }}:${{ github.sha }}
+
+      - name: Run Sentinel gate
+        id: gate
+        env:
+          GATE_TOKEN: ${{ secrets.GATE_TOKEN }}
+        run: |
+          result=$(python pipeline/trivy_to_gate.py \
+            --report     trivy_report.json \
+            --image      ${{ github.repository }}:${{ github.sha }} \
+            --gate       ${{ vars.GATE_URL }} \
+            --dockerfile ./Dockerfile \
+            --token      $GATE_TOKEN 2>&1)
+          echo "result<<EOF" >> $GITHUB_OUTPUT
+          echo "$result"     >> $GITHUB_OUTPUT
+          echo "EOF"         >> $GITHUB_OUTPUT
+
+      - name: Post PR comment with dashboard link
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `${{ steps.gate.outputs.result }}`;
+            const dashboard = output.match(/::sentinel-dashboard::(.+)/)?.[1] || '';
+            const dashLink = dashboard
+              ? `\n\n[🔍 View Security Dashboard](${dashboard})`
+              : '';
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🛡️ Security Gate\n\`\`\`\n${output}\n\`\`\`${dashLink}`
+            });
+
+      - name: Deploy (only on APPROVED or WARNING)
+        if: steps.gate.outcome == 'success'
+        run: docker push ${{ github.repository }}:${{ github.sha }}
 ```
 
-### Trivy como SAST de dependencias
+### GitLab CI
 
-Trivy también puede escanear el filesystem (no solo la imagen) para detectar vulnerabilidades en dependencias antes del build:
+```yaml
+security-gate:
+  stage: security
+  script:
+    - trivy image --format json -o report.json $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - python pipeline/trivy_to_gate.py
+        --report report.json
+        --image  $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+        --gate   $GATE_URL
+        --dockerfile ./Dockerfile
+        --token  $GATE_TOKEN
+```
+
+---
+
+## Switching AI Providers
 
 ```bash
-trivy fs . --format json --output fs_report.json
+# Local Ollama — free, private, no data leaves your network
+AI_PROVIDER=ollama OLLAMA_MODEL=mistral docker compose up
+
+# OpenAI GPT-4o-mini — fast, paid
+AI_PROVIDER=openai OPENAI_API_KEY=sk-... docker compose up gate
+
+# Anthropic Claude — fast, paid
+AI_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... docker compose up gate
+
+# No AI — deterministic rules only (fastest, zero cost)
+AI_PROVIDER=disabled docker compose up gate
 ```
 
 ---
 
 ## API Reference
 
-### `POST /analyze-image`
-
-Recibe un reporte de seguridad y devuelve una decisión de despliegue.
-
-**Headers**
-
-```
-Content-Type: application/json
-Authorization: Bearer <token>   # solo si GATE_AUTH_TOKEN está configurado
-```
-
-**Request body**
-
-```json
-{
-  "image_name": "myapp:1.2.3",
-  "image_size_mb": 320,
-  "vulnerabilities": {
-    "critical": 0,
-    "high": 2,
-    "medium": 8,
-    "low": 15,
-    "unknown": 1
-  },
-  "base_image": "python:3.11-slim",
-  "os_family": "debian",
-  "dockerfile_content": "FROM python:3.11-slim\n...",
-  "scanner_output": "{ ...raw trivy JSON truncado a 4000 chars... }"
-}
-```
-
-| Campo | Tipo | Requerido | Descripción |
-|---|---|---|---|
-| `image_name` | string | ✅ | Nombre completo de la imagen |
-| `image_size_mb` | float > 0 | ✅ | Tamaño en MB |
-| `vulnerabilities` | objeto | — | Conteos por severidad (default: todos 0) |
-| `base_image` | string | — | Imagen base del `FROM` |
-| `os_family` | string | — | SO dentro de la imagen |
-| `dockerfile_content` | string | — | Contenido del Dockerfile (max 4000 chars) |
-| `scanner_output` | string | — | Salida cruda del escáner (max 4000 chars) |
-
-**Response body**
-
-```json
-{
-  "decision": "WARNING",
-  "reason": "Image has 2 high-severity vulnerabilities.",
-  "recommendations": [
-    "Review and patch high-severity vulnerabilities soon.",
-    "Schedule a remediation sprint for the next release."
-  ],
-  "source": "rule_engine",
-  "image_name": "myapp:1.2.3"
-}
-```
-
-| Campo | Valores |
-|---|---|
-| `decision` | `APPROVED` · `WARNING` · `REJECTED` |
-| `source` | `rule_engine` · `ai_model` |
-
-**Códigos HTTP**
-
-| Código | Significado |
-|---|---|
-| 200 | Decisión emitida correctamente |
-| 401 | Token ausente |
-| 403 | Token inválido |
-| 503 | Ollama no disponible |
-
-### `GET /health`
-
-```json
-{ "status": "ok", "ai_disabled": false }
-```
-
-### `GET /`
-
-```json
-{ "status": "ok", "service": "AI DevSecOps Deployment Gate", "ai_disabled": false }
-```
-
----
-
-## Manual de usuario
-
-### 1. Verificar que el servicio está activo
-
-```bash
-curl http://localhost:8000/health
-# { "status": "ok", "ai_disabled": true }
-```
-
-### 2. Escanear una imagen con Trivy
-
-```bash
-docker build -t miapp:1.0.0 .
-
-trivy image \
-  --format json \
-  --output trivy_report.json \
-  --exit-code 0 \
-  miapp:1.0.0
-```
-
-### 3. Enviar el reporte al gate
-
-```bash
-python pipeline/trivy_to_gate.py \
-  --report     trivy_report.json \
-  --image      miapp:1.0.0 \
-  --gate       http://localhost:8000 \
-  --dockerfile ./Dockerfile
-```
-
-Salida esperada:
-
-```
-Parsing Trivy report: trivy_report.json
-Sending report to gate: http://localhost:8000
-  Vulns → critical=0 high=2 medium=8 low=15
-
-============================================================
-  ⚠️   GATE DECISION: WARNING
-============================================================
-  Image  : miapp:1.0.0
-  Source : rule_engine
-  Reason : Image has 2 high-severity vulnerability/ies.
-
-  Recommendations:
-    • Review and patch high-severity vulnerabilities soon.
-    • Schedule a remediation sprint for the next release.
-============================================================
-```
-
-### 4. Usar el script shell (alternativa)
-
-```bash
-export IMAGE_NAME=miapp:1.0.0
-export GATE_URL=http://localhost:8000
-export DOCKERFILE=./Dockerfile
-
-chmod +x pipeline/gate_check.sh
-./pipeline/gate_check.sh
-
-# exit 0 → APPROVED  → continúa el pipeline
-# exit 1 → REJECTED  → el pipeline falla aquí
-# exit 2 → WARNING   → el pipeline continúa con alerta
-```
-
-### 5. Interpretar la decisión
-
-| Decisión | Exit code | Qué hacer |
+| Method | Endpoint | Description |
 |---|---|---|
-| `APPROVED` | 0 | Proceder con `docker push` y despliegue |
-| `WARNING` | 2 | Desplegar pero abrir ticket de remediación |
-| `REJECTED` | 1 | No desplegar; corregir vulnerabilidades primero |
+| `POST` | `/analyze-image` | Main gate — analyse image and return decision |
+| `GET` | `/health` | Health check |
+| `GET` | `/history/{image_name}` | Scan history for an image (requires DB) |
+| `GET` | `/dashboard` | Overall HTML security dashboard |
+| `GET` | `/dashboard/{image_name}` | Per-image HTML dashboard with trend |
+| `GET` | `/exceptions` | List active CVE exceptions |
+| `POST` | `/exceptions` | Add or update a CVE exception |
+| `DELETE` | `/exceptions/{cve_id}` | Deactivate a CVE exception |
+| `GET` | `/schema` | Database SQL schema |
+| `GET` | `/docs` | Swagger UI (disable with `DISABLE_DOCS=true`) |
 
-### 6. Llamada directa a la API (curl)
-
-```bash
-curl -s -X POST http://localhost:8000/analyze-image \
-  -H "Content-Type: application/json" \
-  -d '{
-    "image_name": "miapp:1.0.0",
-    "image_size_mb": 250,
-    "vulnerabilities": {
-      "critical": 0, "high": 1, "medium": 5, "low": 10, "unknown": 0
-    }
-  }' | python -m json.tool
-```
-
----
-
-## Despliegue
-
-### Docker Compose (local / servidor propio)
-
-```bash
-# Producción con Ollama
-docker compose up -d --build
-
-# Solo gate, sin Ollama
-AI_DISABLED=true docker compose up -d gate
-```
-
-### Dockerfile standalone
-
-```bash
-docker build -f app/Dockerfile -t sentinel-gate:latest .
-
-docker run -d \
-  --name sentinel \
-  -p 8000:8000 \
-  -e AI_DISABLED=true \
-  -e GATE_AUTH_TOKEN=mi_token_secreto \
-  sentinel-gate:latest
-```
-
-### Variables de entorno en producción
-
-```bash
-# .env (no commitear)
-OLLAMA_URL=http://ollama-server:11434
-AI_DISABLED=false
-GATE_AUTH_TOKEN=token_generado_con_secrets_token_hex_32
-```
-
-### Render / Railway / Fly.io
-
-1. Conectar el repositorio.
-2. Configurar las variables de entorno en el dashboard.
-3. Comando de inicio: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Health check path: `/health`
-
-> **Nota:** En plataformas SaaS sin GPU, usar `AI_DISABLED=true`. El motor de reglas no requiere Ollama.
-
----
-
-## SaaS / Uso como servicio externo
-
-Sentinel puede desplegarse como servicio centralizado y ser consumido por múltiples proyectos/equipos.
-
-### Arquitectura multi-proyecto
-
-```
-Proyecto A  ──┐
-Proyecto B  ──┼──► POST https://sentinel.tu-empresa.com/analyze-image
-Proyecto C  ──┘         (token por proyecto en Authorization header)
-```
-
-### Configurar autenticación por proyecto
-
-```bash
-# Generar token único por proyecto
-python -c "import secrets; print(secrets.token_hex(32))"
-
-# En el servidor Sentinel
-export GATE_AUTH_TOKEN=token_proyecto_a
-
-# En el pipeline del proyecto A
-curl -H "Authorization: Bearer token_proyecto_a" \
-     -X POST https://sentinel.tu-empresa.com/analyze-image \
-     -d @trivy_report_payload.json
-```
-
-### Llamada desde trivy_to_gate.py contra servidor remoto
-
-```bash
-python pipeline/trivy_to_gate.py \
-  --report     trivy_report.json \
-  --image      miapp:1.0.0 \
-  --gate       https://sentinel.tu-empresa.com \
-  --dockerfile ./Dockerfile
-```
-
----
-
-## Ejemplo completo de GitHub Actions
-
-El archivo completo vive en [`pipeline/github-actions-example.yml`](https://github.com/DannielEU/Sentinel-AI-CD/blob/main/pipeline/github-actions-example.yml). 
-
-**Pasos principales:**
-1. Copiar a `.github/workflows/ci.yml` en tu proyecto
-2. Ajustar variables (IMAGE_NAME, GATE_URL, RENDER_DEPLOY_HOOK_URL)
-3. Cambiar la rama de Sentinel a la que uses (`ref: main`)
-
-**Flujo del workflow:**
-
-```
-┌────────┐     ┌──────────────┐     ┌────────┐
-│ Tests  │────→│ Security Gate│────→│ Deploy │
-└────────┘     └──────────────┘     └────────┘
-               (Trivy + Sentinel)
-                - exit 0: APPROVED ✓ 
-                - exit 2: WARNING ⚠
-                - exit 1: REJECTED ✗
-```
-
-**Características clave:**
-
-- **Tests primero**: Valida coverage >= 80%
-- **Security Gate**: Ejecuta Trivy + Sentinel con `AI_DISABLED=true` (sin GPU)
-- **Comentario en PR**: Publica automáticamente un reporte de vulnerabilidades en la PR
-- **Deploy condicional**: Solo a `main` si todos los jobs pasaron
-- **Exit codes semánticos**: `0` (APPROVED), `2` (WARNING), `1` (REJECTED)
-
-Ver archivo completo en [`pipeline/github-actions-example.yml`](https://github.com/DannielEU/Sentinel-AI-CD/blob/main/pipeline/github-actions-example.yml) para la implementación detallada.
-
----
-
-## Ejemplos de respuesta
-
-### REJECTED — vulnerabilidad crítica (rule engine)
-
-```json
-{
-  "decision": "REJECTED",
-  "reason": "Image has 1 critical vulnerability/ies. Deployment is blocked.",
-  "recommendations": [
-    "Update base image to a patched version.",
-    "Run `trivy image --severity CRITICAL <image>` to list affected packages.",
-    "Pin vulnerable packages to fixed versions in the Dockerfile."
-  ],
-  "source": "rule_engine",
-  "image_name": "myapp:1.2.3"
-}
-```
-
-### WARNING — análisis contextual de Mistral (ai_model)
+### Gate Decision Schema
 
 ```json
 {
   "decision": "WARNING",
-  "reason": "The image has 2 high and 8 medium vulnerabilities; no critical issues but remediation is recommended before next release.",
+  "reason": "2 high-severity vulnerabilities detected.",
   "recommendations": [
-    "Upgrade python:3.11-slim base image to latest patch.",
-    "Enable Dependabot for automatic dependency updates.",
-    "Consider switching to distroless for a smaller attack surface.",
-    "Run `pip audit` as part of the build to catch Python package CVEs."
+    "Update libssl to patched version (CVE-2023-1234).",
+    "Run trivy image --severity HIGH myapp:1.2.3 for details."
   ],
+  "summary": "Image myapp:1.2.3 has 2 HIGH vulns...",
   "source": "ai_model",
-  "image_name": "myapp:1.2.3"
+  "image_name": "myapp:1.2.3",
+  "dashboard_url": "http://localhost:8000/dashboard/myapp:1.2.3"
 }
 ```
 
-### APPROVED — imagen limpia (ai_model)
+`source` values: `rule_engine` | `ai_model` | `secrets_detector`
 
-```json
-{
-  "decision": "APPROVED",
-  "reason": "No critical or high vulnerabilities found; image size and dependency posture are acceptable.",
-  "recommendations": [
-    "Continue monitoring for new CVEs with scheduled Trivy scans.",
-    "Consider adding a SBOM generation step to the pipeline."
-  ],
-  "source": "ai_model",
-  "image_name": "myapp:1.2.3"
-}
+---
+
+## Project Structure
+
+```
+app/
+├── domain/                         # Core — no external dependencies
+│   ├── entities.py                 # ImageReport, GateDecision, ScanRecord, CVEException
+│   ├── rules.py                    # Deterministic OWASP rule engine + whitelist support
+│   └── ports/
+│       ├── ai_provider.py          # AIProviderPort Protocol
+│       └── repository.py           # RepositoryPort Protocol
+├── application/
+│   └── gate_service.py             # Orchestrator: secrets → whitelist → rules → AI → persist
+├── infrastructure/
+│   ├── ai/
+│   │   ├── factory.py              # Provider detection at startup (before model pull)
+│   │   ├── ollama.py               # Local Ollama adapter
+│   │   ├── openai_provider.py      # OpenAI REST adapter (no SDK, uses httpx)
+│   │   ├── anthropic_provider.py   # Anthropic REST adapter (no SDK, uses httpx)
+│   │   ├── prompt.py               # Shared prompt builder
+│   │   └── parser.py               # Shared AI response JSON parser
+│   ├── persistence/
+│   │   ├── factory.py              # DB detection at startup
+│   │   ├── null_repository.py      # No-op adapter (DATABASE_URL not set)
+│   │   └── sql_repository.py       # SQLAlchemy async (SQLite + PostgreSQL)
+│   └── security/
+│       └── secrets_detector.py     # Regex-based Dockerfile secret scanner
+└── web/
+    └── main.py                     # FastAPI thin controller, all endpoints
+
+pipeline/
+├── trivy_to_gate.py                # Trivy JSON → Gate adapter (CI/CD script)
+└── gate_check.sh                   # Universal shell wrapper
+
+schema.sql                          # Database schema (SQLite + PostgreSQL compatible)
+docker-compose.yml
+requirements.txt
 ```
 
 ---
 
-## Estructura del proyecto
+## Database Schema
 
+Documented in [`schema.sql`](schema.sql) and available at `GET /schema`.
+
+```sql
+scan_history    -- one row per gate decision
+  id, image_name, decision, reason, source,
+  critical_vulns, high_vulns, medium_vulns, low_vulns,
+  image_size_mb, secrets_found, ai_provider, scanned_at
+
+cve_exceptions  -- CVE whitelist with optional expiry
+  id, cve_id, reason, approved_by, expires_at, created_at, is_active
 ```
-sentinel-ai-cd/
-├── app/
-│   ├── main.py            # FastAPI app — endpoints y orquestación
-│   ├── schemas.py         # Modelos Pydantic (ImageReport, GateDecision)
-│   ├── rule_engine.py     # Motor de reglas determinístico (OWASP-aligned)
-│   ├── ollama_client.py   # Cliente HTTP para Ollama + construcción de prompt
-│   └── Dockerfile         # Imagen de producción (non-root)
-├── pipeline/
-│   ├── trivy_to_gate.py            # Adaptador: parsea Trivy JSON y llama a /analyze-image
-│   ├── gate_check.sh               # Script shell universal (GitLab, Jenkins, Bitbucket, etc.)
-│   └── github-actions-example.yml  # Plantilla lista para copiar a .github/workflows/
-├── requirements.txt
-├── docker-compose.yml
-└── README.md
-```
-
-### ¿Para qué sirve cada archivo de `pipeline/`?
-
-| Archivo | Propósito |
-|---|---|
-| `trivy_to_gate.py` | Convierte el JSON de Trivy al formato que espera la API y llama a `/analyze-image`. Es el núcleo del adaptador. |
-| `gate_check.sh` | Script shell que orquesta todo: corre Trivy, llama a `trivy_to_gate.py` e interpreta el exit code. Funciona en **cualquier CI** (GitLab CI, Jenkins, Bitbucket Pipelines, etc.) con solo exportar 3 variables. |
-| `github-actions-example.yml` | Plantilla de workflow completa para GitHub Actions. **No se ejecuta automáticamente** (vive en `pipeline/`, no en `.github/workflows/`). Es el ejemplo que copias y adaptas en tu propio proyecto. |
 
 ---
 
-## Troubleshooting
+## Security Notes
 
-### El gate no inicia — "Failed to connect to Ollama"
-
-**Causa:** `OLLAMA_URL` apunta a un servidor que no está activo.
-
-**Solución:**
-```bash
-# Verificar que Ollama está corriendo
-curl http://localhost:11434
-
-# Si no, iniciar Ollama
-ollama serve &
-
-# Si usas Docker Compose, verificar que el servicio está up
-docker compose ps
-```
-
-### Trivy devuelve "database is locked"
-
-**Causa:** Múltiples procesos de Trivy accediendo la BD simultáneamente.
-
-**Solución:** Usar `--exit-code 0` en el comando trivy para no fallar, o agregar un pequeño delay entre escaneos.
-
-```bash
-trivy image --format json --exit-code 0 --output report.json miapp:1.0.0
-```
-
-### El gate devuelve "503 Service Unavailable"
-
-**Causa:** Ollama no responde (GPU agotada, timeout, crash).
-
-**Solución:**
-```bash
-# Ver logs de Ollama
-docker compose logs ollama
-
-# Reiniciar el servicio
-docker compose restart ollama
-
-# O desactivar AI y usar solo reglas
-AI_DISABLED=true docker compose up -d
-```
-
-### El script `trivy_to_gate.py` dice "connection refused"
-
-**Causa:** El gate no está escuchando en el puerto especificado.
-
-**Solución:**
-```bash
-# Verificar que el gate está activo
-curl http://localhost:8000/health
-
-# Si no, iniciar el gate
-cd app && uvicorn main:app --port 8000
-```
-
-### La autenticación con token no funciona
-
-**Verificar:** El token debe incluirse en el header `Authorization: Bearer <token>`. Asegúrate de:
-
-```bash
-# Generar un token válido
-export GATE_AUTH_TOKEN=$(python -c "import secrets; print(secrets.token_hex(32))")
-
-# Incluirlo en la llamada
-curl -H "Authorization: Bearer $GATE_AUTH_TOKEN" \
-     -X POST http://localhost:8000/analyze-image \
-     -d @payload.json
-```
-
-### La imagen se aprueba pero debería ser rechazada
-
-**Verificar:**
-1. Los umbrales en `app/rule_engine.py` son los esperados.
-2. El payload JSON incluye los conteos de vulnerabilidades correctos.
-3. Si `AI_DISABLED=false`, el modelo IA puede dar una decisión diferente que las reglas.
-
-**Debug:** Envía el payload manualmente y revisa el campo `source` en la respuesta para saber si vino del `rule_engine` o del `ai_model`.
-
----
-
-<p align="center">
-  Hecho con FastAPI · Trivy · Ollama · Mistral
-</p>
+- `REJECTED` from the secrets detector or rule engine is **never overridden by AI** — safety stays deterministic
+- Bearer token comparison uses SHA-256 + `secrets.compare_digest` (constant-time, timing-attack safe)
+- Rate limiting: 100 req/min per IP with configurable window
+- Auth-failure backoff: locked after 5 failed attempts in 5 minutes
+- Container runs as non-root (`gateuser:1000`)
+- No data sent to third parties when using Ollama
+- CVE exceptions require a human-readable `reason` field and can include an expiry date
