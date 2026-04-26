@@ -15,10 +15,6 @@ LABEL org.opencontainers.image.description="Intelligent CI/CD security gate for 
 LABEL org.opencontainers.image.vendor="Sentinel-AI-CD"
 LABEL org.opencontainers.image.version="2.0.0"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl && \
-    rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # Copy installed packages from builder
@@ -30,14 +26,33 @@ COPY app/ ./
 # Copy schema.sql so /schema endpoint can serve it
 COPY schema.sql /schema.sql
 
-# Persistent data directory for SQLite
-RUN mkdir -p /app/data
+# ── Security hardening ────────────────────────────────────────────────────────
+# Step 1: Apply all available Debian security patches (resolves medium/low CVEs)
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -r -u 1000 -s /sbin/nologin gateuser && \
-    chown -R gateuser:gateuser /app
+# Step 2: Remove packages with HIGH CVEs that have no upstream fix yet and are
+# not required by a headless FastAPI server.
+#   ncurses*      — interactive terminal support, not needed for a server process
+#   libnghttp2-14 — C nghttp2 lib; httpx/h2 uses pure-Python HTTP/2, not this
+#   libsystemd0   — systemd library, irrelevant inside a container
+#   libudev1      — udev device manager library, irrelevant inside a container
+# Using ; separators so that partial dep conflicts don't abort the build.
+RUN apt-get update \
+ ; apt-get purge -y --auto-remove \
+       libncursesw6 libtinfo6 ncurses-base ncurses-bin \
+       libnghttp2-14 \
+       libsystemd0 libudev1 \
+ ; apt-get autoremove -y \
+ ; rm -rf /var/lib/apt/lists/*
 
-RUN chmod 755 /app
+# Persistent data directory for SQLite and permissions
+RUN mkdir -p /app/data && \
+    useradd -r -u 1000 -s /sbin/nologin gateuser && \
+    chown -R gateuser:gateuser /app && \
+    chmod 755 /app
 
 USER gateuser
 
