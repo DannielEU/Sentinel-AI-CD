@@ -260,31 +260,50 @@ async def generate_summary(report: ImageReport, decision: str, reason: str) -> s
 
 async def analyze(report: ImageReport) -> GateDecision:
     """Send *report* to Ollama and return a :class:`GateDecision`."""
-    prompt = _build_prompt(report)
+    try:
+        prompt = _build_prompt(report)
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.2,   # low temperature for consistent, factual output
-            "num_predict": 512,
-        },
-    }
+        payload = {
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,   # low temperature for consistent, factual output
+                "num_predict": 512,
+            },
+        }
 
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
-        response.raise_for_status()
+        logger.info("Sending prompt to Ollama (%d chars)...", len(prompt))
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
+            response.raise_for_status()
 
-    ollama_data = response.json()
-    raw_text: str = ollama_data.get("response", "")
+        logger.info("Ollama response status: %d", response.status_code)
 
-    parsed = _parse_response(raw_text)
+        try:
+            ollama_data = response.json()
+        except Exception as e:
+            logger.error("Failed to parse Ollama JSON response: %s", str(e))
+            logger.error("Response text: %s", response.text[:500])
+            raise ValueError(f"Ollama returned invalid JSON: {str(e)}")
 
-    return GateDecision(
-        decision=parsed["decision"],
-        reason=parsed["reason"],
-        recommendations=parsed["recommendations"],
-        source="ai_model",
-        image_name=report.image_name,
-    )
+        raw_text: str = ollama_data.get("response", "")
+        if not raw_text:
+            logger.error("Ollama response missing 'response' field. Got keys: %s", list(ollama_data.keys()))
+            raise ValueError("Ollama response missing 'response' field")
+
+        logger.info("Ollama raw response (%d chars): %s", len(raw_text), raw_text[:200])
+
+        parsed = _parse_response(raw_text)
+        logger.info("Parsed decision: %s", parsed.get("decision"))
+
+        return GateDecision(
+            decision=parsed["decision"],
+            reason=parsed["reason"],
+            recommendations=parsed.get("recommendations", []),
+            source="ai_model",
+            image_name=report.image_name,
+        )
+    except Exception as e:
+        logger.exception("Error during AI analysis of %s: %s", report.image_name, str(e))
+        raise

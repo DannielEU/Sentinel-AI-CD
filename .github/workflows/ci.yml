@@ -10,7 +10,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}:${{ github.sha }}
   GATE_URL: http://localhost:8000
   # AI Model Configuration
-  OLLAMA_MODEL: neural-chat  # Models: neural-chat, mistral, llama2
+  OLLAMA_MODEL: mistral  # Models: mistral (recommended), neural-chat, llama2
   AI_ENABLED: "true"          # Set to "true" to enable AI analysis with Ollama; "false" for rule-engine only
   # Security Thresholds (configurable)
   MAX_IMAGE_SIZE_MB: "1200"   # Warn if image exceeds this size

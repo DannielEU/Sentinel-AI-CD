@@ -41,8 +41,8 @@ services:
     environment:
       # Para Ollama local (mapeo interno es 11434, externo es 11435)
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
-      # Para usar modelo distinto (neural-chat es mejor para seguridad + Docker)
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-neural-chat}
+      # Para usar modelo distinto (mistral es mejor para JSON estructurado)
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
       # Deshabilitar IA por defecto (activar cuando Ollama esté ready)
       - AI_DISABLED=${AI_DISABLED:-true}
       # Token de autenticación (opcional)
