@@ -52,7 +52,7 @@ class GateDecision(BaseModel):
     decision: str = Field(..., pattern=r"^(APPROVED|WARNING|REJECTED)$")
     reason: str = Field(..., max_length=500)
     recommendations: list[str] = Field(default_factory=list, max_length=5)
-    summary: Optional[str] = Field(default=None, max_length=1000)
+    summary: Optional[str] = Field(default=None, max_length=2000)
     source: str = Field(
         default="rule_engine",
         pattern=r"^(rule_engine|ai_model|secrets_detector)$",

@@ -57,7 +57,12 @@ Your role is to approve or reject container image deployments based on security 
 
 ## Response Format
 Respond ONLY with valid JSON (no markdown, no extra text):
-{{"decision": "APPROVED|WARNING|REJECTED", "reason": "Single sentence explaining the decision", "recommendations": ["action1", "action2", "action3"], "summary": "2-3 sentence professional summary for the dev team explaining security implications and recommended next steps"}}
+{{
+  "decision": "APPROVED|WARNING|REJECTED",
+  "reason": "Single sentence explaining the decision",
+  "recommendations": ["action1", "action2", "action3"],
+  "summary": "Detailed security assessment of at least 6 lines covering: (1) overall security posture of the image, (2) the most critical findings and their potential impact, (3) which packages or layers are affected, (4) exploitability context or known active exploitation, (5) recommended remediation priority and timeline, (6) any positive security practices already in place"
+}}
 """
 
 
