@@ -56,6 +56,7 @@ class OpenAIProvider:
             decision=parsed["decision"],
             reason=parsed.get("reason", ""),
             recommendations=parsed.get("recommendations", []),
+            summary=parsed.get("summary"),
             source="ai_model",
             image_name=report.image_name,
         )

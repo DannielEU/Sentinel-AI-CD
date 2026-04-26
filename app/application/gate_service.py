@@ -11,6 +11,7 @@ Coordinates the full analysis pipeline:
 """
 
 import logging
+import os
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -202,8 +203,20 @@ class GateService:
     def _inject_dashboard_url(
         self, decision: GateDecision, gate_base_url: str
     ) -> GateDecision:
-        if not gate_base_url or not self._repo.is_available:
+        if not self._repo.is_available:
             return decision
+
+        # Prefer an explicitly configured external URL (avoids localhost links in CI)
+        external = os.getenv("GATE_EXTERNAL_URL", "").strip().rstrip("/")
+        base = external or gate_base_url
+
+        # Never emit a localhost/loopback dashboard URL — it won't be reachable
+        # after the CI container is torn down
+        if not base or any(
+            h in base for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+        ):
+            return decision
+
         encoded = urllib.parse.quote(decision.image_name, safe="")
-        url = f"{gate_base_url}/dashboard/{encoded}"
+        url = f"{base}/dashboard/{encoded}"
         return decision.model_copy(update={"dashboard_url": url})

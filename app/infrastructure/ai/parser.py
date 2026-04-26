@@ -38,4 +38,7 @@ def parse_ai_response(raw: str) -> dict:
         recs = [str(recs)]
     data["recommendations"] = [str(r) for r in recs]
 
+    summary = data.get("summary")
+    data["summary"] = str(summary)[:1000] if summary else None
+
     return data

@@ -57,7 +57,7 @@ Your role is to approve or reject container image deployments based on security 
 
 ## Response Format
 Respond ONLY with valid JSON (no markdown, no extra text):
-{{"decision": "APPROVED|WARNING|REJECTED", "reason": "single sentence", "recommendations": ["action1", "action2"]}}
+{{"decision": "APPROVED|WARNING|REJECTED", "reason": "Single sentence explaining the decision", "recommendations": ["action1", "action2", "action3"], "summary": "2-3 sentence professional summary for the dev team explaining security implications and recommended next steps"}}
 """
 
 
