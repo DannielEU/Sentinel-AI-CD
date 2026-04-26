@@ -1,40 +1,81 @@
 # Sentinel — AI DevSecOps Deployment Gate
 
-> **Repositorio:** [github.com/DannielEU/Sentinel-AI-CD](https://github.com/DannielEU/Sentinel-AI-CD) · rama activa: `main`
+<div align="center">
 
-> Puerta de seguridad inteligente para pipelines CI/CD. Analiza imágenes de contenedor con **Trivy**, aplica un motor de reglas determinístico alineado con **OWASP** y —opcionalmente— consulta a **Neural-Chat via Ollama** (especializado en seguridad Docker) para decidir si un despliegue debe ser `APPROVED`, `WARNING` o `REJECTED`. Compatible con **Azure Container Instances, App Service** y entornos on-premise.
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009485?logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-24%2B-2496ED?logo=docker&logoColor=white)
+![Trivy](https://img.shields.io/badge/Trivy-0.50%2B-1DA1F2?logo=aquasecurity&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
----
+**Puerta de seguridad inteligente para pipelines CI/CD**
 
-## Tabla de contenidos
+[Instalación](#instalación) · [Documentación](#tabla-de-contenidos) · [GitHub](https://github.com/DannielEU/Sentinel-AI-CD)
 
-1. [¿Qué es Sentinel?](#qué-es-sentinel)
-2. [Tecnología](#tecnología)
-3. [Instalación](#instalación)
-4. [Configuración](#configuración)
-5. [Flujo del pipeline](#flujo-del-pipeline)
-6. [Motor de reglas (OWASP)](#motor-de-reglas-owasp)
-7. [Detección estática (SAST)](#detección-estática-sast)
-8. [API Reference](#api-reference)
-9. [Manual de usuario](#manual-de-usuario)
-10. [Despliegue](#despliegue)
-11. [SaaS / Uso como servicio externo](#saas--uso-como-servicio-externo)
-12. [Ejemplo completo de GitHub Actions](#ejemplo-completo-de-github-actions)
-13. [Ejemplos de respuesta](#ejemplos-de-respuesta)
+</div>
 
 ---
 
 ## ¿Qué es Sentinel?
 
-Sentinel es un microservicio REST que se inserta en cualquier pipeline CI/CD como paso de validación de seguridad antes del despliegue. Recibe el reporte JSON de Trivy, lo evalúa contra un conjunto de políticas y devuelve una decisión estructurada que el pipeline puede consumir directamente mediante exit codes estándar.
+Puerta de seguridad inteligente para pipelines CI/CD. Analiza imágenes de contenedor con **Trivy**, aplica un motor de reglas determinístico alineado con **OWASP** y —opcionalmente— consulta a **Mistral vía Ollama** (o **Neural-Chat**, especializado en seguridad Docker) para decidir si un despliegue debe ser `APPROVED`, `WARNING` o `REJECTED`.
 
+**Compatible con:** Azure Container Instances · App Service · Render · Railway · Fly.io · Kubernetes · On-premise
+
+---
+
+## Características clave
+
+- **Motor de reglas OWASP-aligned** — bloquea vulnerabilidades críticas, controla severidad
+- **AI contextual opcional** — Mistral/Neural-Chat analiza imágenes complejas sin enviar datos a terceros
+- **Integración trivial** — un script Python + variables de entorno en cualquier CI/CD
+- **Autenticación de token** — protege el endpoint si lo expones públicamente
+- **Rápido** — decisión inmediata en modo reglas puras (~<100ms)
+- **Sin dependencias de servicios externos** — Ollama es local, sin costos de API
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clonar y levantar con Docker Compose
+git clone https://github.com/DannielEU/Sentinel-AI-CD.git
+cd Sentinel-AI-CD
+docker compose up -d
+
+# 2. Escanear una imagen
+docker build -t miapp:1.0.0 .
+trivy image --format json --output report.json miapp:1.0.0
+
+# 3. Enviar al gate
+python pipeline/trivy_to_gate.py \
+  --report report.json \
+  --image miapp:1.0.0 \
+  --dockerfile ./Dockerfile
+
+# Resultado: APPROVED | WARNING | REJECTED
 ```
-git push
-  └─► docker build
-        └─► trivy scan  ──► trivy_report.json
-              └─► POST /analyze-image  ──► { decision: "APPROVED" | "WARNING" | "REJECTED" }
-                    └─► exit 0 / 2 / 1  ──► docker push  o  pipeline falla
-```
+
+**APIs disponibles:** 
+- Swagger: http://localhost:8000/docs
+- Gate: http://localhost:8000/analyze-image (POST)
+- Health: http://localhost:8000/health (GET)
+
+---
+
+## Tabla de contenidos
+
+1. [Características clave](#características-clave)
+2. [Tecnología](#tecnología)
+3. [Instalación](#instalación)
+4. [Configuración](#configuración)
+5. [Flujo del pipeline](#flujo-del-pipeline)
+6. [Motor de reglas (OWASP)](#motor-de-reglas-owasp)
+7. [API Reference](#api-reference)
+8. [Manual de usuario](#manual-de-usuario)
+9. [Despliegue](#despliegue)
+10. [GitHub Actions](#ejemplo-completo-de-github-actions)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -554,141 +595,34 @@ python pipeline/trivy_to_gate.py \
 
 ## Ejemplo completo de GitHub Actions
 
-El archivo completo vive en [`pipeline/github-actions-example.yml`](https://github.com/DannielEU/Sentinel-AI-CD/blob/main/pipeline/github-actions-example.yml). Cópialo a `.github/workflows/ci.yml` en tu proyecto y ajusta las variables.
+El archivo completo vive en [`pipeline/github-actions-example.yml`](https://github.com/DannielEU/Sentinel-AI-CD/blob/main/pipeline/github-actions-example.yml). 
 
-Combina tres jobs en secuencia: **tests → security-gate → deploy**.
+**Pasos principales:**
+1. Copiar a `.github/workflows/ci.yml` en tu proyecto
+2. Ajustar variables (IMAGE_NAME, GATE_URL, RENDER_DEPLOY_HOOK_URL)
+3. Cambiar la rama de Sentinel a la que uses (`ref: main`)
 
-Comportamiento clave del job `security-gate`:
-- El gate **no hace `exit 1` inmediatamente** al recibir REJECTED — primero publica el comentario y el artifact, y solo entonces falla el job.
-- El comentario de PR se publica **siempre** (`if: always()`), incluyendo cuando el despliegue es bloqueado.
-- Se sube un artifact `sentinel-security-report` con el reporte detallado en Markdown + el JSON crudo de Trivy (retención 30 días).
+**Flujo del workflow:**
 
-```yaml
-name: CI · Security Gate · Deploy
-# Repo Sentinel: https://github.com/DannielEU/Sentinel-AI-CD
-# Rama: feature/SecurityAndPresentability
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
-
-env:
-  IMAGE_NAME: ${{ github.repository }}:${{ github.sha }}
-  GATE_URL: http://localhost:8000
-
-jobs:
-  # ── 1. Tests + coverage ────────────────────────────────────────────────────
-  test:
-    name: Tests (>=80% coverage)
-    runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: sqlite:///./test.db
-      JWT_SECRET: ci-secret
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Run tests with coverage
-        run: python -m pytest --cov=. --cov-report=term-missing --cov-fail-under=80
-
-  # ── 2. Security Gate (Trivy + Sentinel) ───────────────────────────────────
-  security-gate:
-    name: Security Gate (Trivy + Sentinel)
-    runs-on: ubuntu-latest
-    needs: test
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-
-      # Checkout de Sentinel desde su rama activa
-      - name: Checkout Sentinel
-        uses: actions/checkout@v4
-        with:
-          repository: DannielEU/Sentinel-AI-CD
-          ref: feature/SecurityAndPresentability
-          path: Sentinel-AI-CD
-
-      - name: Build Docker image
-        run: docker build -t $IMAGE_NAME .
-
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin
-
-      - name: Scan image with Trivy
-        run: |
-          trivy image --format json --output trivy_report.json --exit-code 0 $IMAGE_NAME
-          trivy image --format table --exit-code 0 $IMAGE_NAME
-
-      # Levantar Sentinel con Ollama desactivado (solo motor de reglas)
-      - name: Start Sentinel gate
-        run: |
-          pip install fastapi uvicorn httpx pydantic --quiet
-          cd Sentinel-AI-CD/app && AI_DISABLED=true uvicorn main:app --port 8000 &
-          for i in $(seq 1 15); do
-            curl -sf http://localhost:8000/health && break
-            sleep 2
-          done
-        env:
-          AI_DISABLED: "true"
-
-      - name: Run Sentinel security gate
-        id: gate
-        # exit 0 APPROVED → continúa | exit 2 WARNING → continúa | exit 1 REJECTED → falla
-        run: |
-          set +e
-          python3 Sentinel-AI-CD/pipeline/trivy_to_gate.py \
-            --report trivy_report.json \
-            --image  "$IMAGE_NAME" \
-            --gate   "$GATE_URL" \
-            --dockerfile ./Dockerfile
-          GATE_EXIT=$?
-          set -e
-          case $GATE_EXIT in
-            0) echo "gate_decision=APPROVED" >> $GITHUB_OUTPUT ;;
-            2) echo "gate_decision=WARNING"  >> $GITHUB_OUTPUT ;;
-            1) echo "gate_decision=REJECTED" >> $GITHUB_OUTPUT ; exit 1 ;;
-            *) echo "gate_decision=ERROR"    >> $GITHUB_OUTPUT ; exit $GATE_EXIT ;;
-          esac
-
-      # Genera y publica un comentario sticky en la PR con el resumen
-      - name: Build vulnerability summary
-        if: github.event_name == 'pull_request'
-        run: |
-          python3 Sentinel-AI-CD/pipeline/build_pr_summary.py \
-            --report trivy_report.json \
-            --decision "$GATE_DECISION" \
-            --image    "$IMAGE_NAME" \
-            --output   pr_comment.md
-        env:
-          GATE_DECISION: ${{ steps.gate.outputs.gate_decision }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
-
-      - name: Post security summary on PR
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          path: pr_comment.md
-
-  # ── 3. Deploy — solo main, solo si ambos jobs pasaron ─────────────────────
-  deploy:
-    name: Deploy to Render
-    runs-on: ubuntu-latest
-    needs: [test, security-gate]
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Trigger Render deploy hook
-        env:
-          deploy_url: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-        run: curl -X POST "$deploy_url"
 ```
+┌────────┐     ┌──────────────┐     ┌────────┐
+│ Tests  │────→│ Security Gate│────→│ Deploy │
+└────────┘     └──────────────┘     └────────┘
+               (Trivy + Sentinel)
+                - exit 0: APPROVED ✓ 
+                - exit 2: WARNING ⚠
+                - exit 1: REJECTED ✗
+```
+
+**Características clave:**
+
+- **Tests primero**: Valida coverage >= 80%
+- **Security Gate**: Ejecuta Trivy + Sentinel con `AI_DISABLED=true` (sin GPU)
+- **Comentario en PR**: Publica automáticamente un reporte de vulnerabilidades en la PR
+- **Deploy condicional**: Solo a `main` si todos los jobs pasaron
+- **Exit codes semánticos**: `0` (APPROVED), `2` (WARNING), `1` (REJECTED)
+
+Ver archivo completo en [`pipeline/github-actions-example.yml`](https://github.com/DannielEU/Sentinel-AI-CD/blob/main/pipeline/github-actions-example.yml) para la implementación detallada.
 
 ---
 
@@ -770,6 +704,88 @@ sentinel-ai-cd/
 | `trivy_to_gate.py` | Convierte el JSON de Trivy al formato que espera la API y llama a `/analyze-image`. Es el núcleo del adaptador. |
 | `gate_check.sh` | Script shell que orquesta todo: corre Trivy, llama a `trivy_to_gate.py` e interpreta el exit code. Funciona en **cualquier CI** (GitLab CI, Jenkins, Bitbucket Pipelines, etc.) con solo exportar 3 variables. |
 | `github-actions-example.yml` | Plantilla de workflow completa para GitHub Actions. **No se ejecuta automáticamente** (vive en `pipeline/`, no en `.github/workflows/`). Es el ejemplo que copias y adaptas en tu propio proyecto. |
+
+---
+
+## Troubleshooting
+
+### El gate no inicia — "Failed to connect to Ollama"
+
+**Causa:** `OLLAMA_URL` apunta a un servidor que no está activo.
+
+**Solución:**
+```bash
+# Verificar que Ollama está corriendo
+curl http://localhost:11434
+
+# Si no, iniciar Ollama
+ollama serve &
+
+# Si usas Docker Compose, verificar que el servicio está up
+docker compose ps
+```
+
+### Trivy devuelve "database is locked"
+
+**Causa:** Múltiples procesos de Trivy accediendo la BD simultáneamente.
+
+**Solución:** Usar `--exit-code 0` en el comando trivy para no fallar, o agregar un pequeño delay entre escaneos.
+
+```bash
+trivy image --format json --exit-code 0 --output report.json miapp:1.0.0
+```
+
+### El gate devuelve "503 Service Unavailable"
+
+**Causa:** Ollama no responde (GPU agotada, timeout, crash).
+
+**Solución:**
+```bash
+# Ver logs de Ollama
+docker compose logs ollama
+
+# Reiniciar el servicio
+docker compose restart ollama
+
+# O desactivar AI y usar solo reglas
+AI_DISABLED=true docker compose up -d
+```
+
+### El script `trivy_to_gate.py` dice "connection refused"
+
+**Causa:** El gate no está escuchando en el puerto especificado.
+
+**Solución:**
+```bash
+# Verificar que el gate está activo
+curl http://localhost:8000/health
+
+# Si no, iniciar el gate
+cd app && uvicorn main:app --port 8000
+```
+
+### La autenticación con token no funciona
+
+**Verificar:** El token debe incluirse en el header `Authorization: Bearer <token>`. Asegúrate de:
+
+```bash
+# Generar un token válido
+export GATE_AUTH_TOKEN=$(python -c "import secrets; print(secrets.token_hex(32))")
+
+# Incluirlo en la llamada
+curl -H "Authorization: Bearer $GATE_AUTH_TOKEN" \
+     -X POST http://localhost:8000/analyze-image \
+     -d @payload.json
+```
+
+### La imagen se aprueba pero debería ser rechazada
+
+**Verificar:**
+1. Los umbrales en `app/rule_engine.py` son los esperados.
+2. El payload JSON incluye los conteos de vulnerabilidades correctos.
+3. Si `AI_DISABLED=false`, el modelo IA puede dar una decisión diferente que las reglas.
+
+**Debug:** Envía el payload manualmente y revisa el campo `source` en la respuesta para saber si vino del `rule_engine` o del `ai_model`.
 
 ---
 
