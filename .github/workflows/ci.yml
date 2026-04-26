@@ -274,18 +274,30 @@ jobs:
             echo "  Payload: $TEST_PAYLOAD" >> /tmp/gate_debug.log
 
             CURL_EXIT=0
-            curl -v -X POST http://localhost:8000/analyze-image \
+            curl -s -X POST http://localhost:8000/analyze-image \
               -H "Content-Type: application/json" \
-              -d "$TEST_PAYLOAD" > /tmp/ai_test.json 2>&1 || CURL_EXIT=$?
+              -d "$TEST_PAYLOAD" > /tmp/ai_test.json 2>/tmp/curl_error.log || CURL_EXIT=$?
 
             if [ $CURL_EXIT -eq 0 ] && [ -s /tmp/ai_test.json ]; then
-              SOURCE=$(grep -o '"source":"[^"]*' /tmp/ai_test.json | cut -d'"' -f4)
-              DECISION=$(grep -o '"decision":"[^"]*' /tmp/ai_test.json | cut -d'"' -f4)
+              # Extract only JSON (skip verbose curl output if any)
+              JSON_LINE=$(tail -1 /tmp/ai_test.json)
+              SOURCE=$(echo "$JSON_LINE" | grep -o '"source":"[^"]*' | cut -d'"' -f4)
+              DECISION=$(echo "$JSON_LINE" | grep -o '"decision":"[^"]*' | cut -d'"' -f4)
 
-              if [ "$SOURCE" = "ai_model" ]; then
+              if [ -z "$SOURCE" ]; then
+                echo "  ❌ Could not parse JSON response!"
+                echo "Response file:"
+                cat /tmp/ai_test.json
+                if [ -s /tmp/curl_error.log ]; then
+                  echo ""
+                  echo "Curl stderr:"
+                  cat /tmp/curl_error.log
+                fi
+                exit 1
+              elif [ "$SOURCE" = "ai_model" ]; then
                 echo "  ✅ Gate consulted Ollama (source: ai_model) — decision: $DECISION"
               else
-                echo "  ❌ Gate used $SOURCE instead of Ollama (ai_model)!"
+                echo "  ❌ Gate used '$SOURCE' instead of Ollama (ai_model)!"
                 echo ""
                 echo "This means the rule engine matched before consulting the LLM."
                 echo "Full response:"
