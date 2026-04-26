@@ -1,0 +1,119 @@
+# Sentinel-AI-CD — Docker Compose LOCAL
+# ======================================
+# Uso exclusivo para pruebas en máquina local.
+# Para producción/CD usa el docker-compose.yml de la raíz del proyecto.
+#
+# Modos de inicio:
+#
+#   A) Ollama ya corre en el host (lo más común en Linux/Mac):
+#      docker compose --profile postgres up -d
+#      → El gate se conecta al Ollama del host via host.docker.internal:11434
+#
+#   B) Sin Ollama previo (lo arranca Docker Compose):
+#      docker compose --profile postgres --profile with-ollama up -d
+#      docker exec sentinel-local-ollama ollama pull mistral
+#
+#   C) Sin base de datos (SQLite):
+#      docker compose up -d   (ajustar DATABASE_URL en .env)
+#
+# Ver logs:
+#   docker compose logs -f gate
+
+services:
+
+  # ── Ollama — LLM Local (solo si NO tienes Ollama corriendo en el host) ─────
+  # Activar con: --profile with-ollama
+  # Si Ollama ya corre en tu máquina, NO uses este perfil.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sentinel-local-ollama
+    profiles: [with-ollama]
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11435}:11434"   # 11435 para no chocar con Ollama del host
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=10m
+
+  # ── Sentinel Gate — FastAPI ───────────────────────────────────────────────
+  gate:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    container_name: sentinel-local-gate
+    restart: unless-stopped
+    ports:
+      - "${GATE_PORT:-8000}:8000"
+    volumes:
+      - sentinel-data:/app/data
+    # Permite que el contenedor resuelva host.docker.internal → IP del host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # ── IA ────────────────────────────────────────────────────────────────
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      # OLLAMA_URL en .env controla a dónde apunta:
+      #   Ollama en el host    → http://host.docker.internal:11434  (default)
+      #   Ollama en contenedor → http://sentinel-local-ollama:11434
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+
+      # ── Base de datos ─────────────────────────────────────────────────────
+      # SQLite (default, sin servicios extra):
+      #   sqlite+aiosqlite:///./data/sentinel.db
+      # PostgreSQL (requiere --profile postgres):
+      #   postgresql+asyncpg://sentinel:sentinel@db:5432/sentinel
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/sentinel.db}
+
+      # ── Auth y seguridad ──────────────────────────────────────────────────
+      - GATE_AUTH_TOKEN=${GATE_AUTH_TOKEN:-}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-200}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      - AUTH_FAILURE_LIMIT=${AUTH_FAILURE_LIMIT:-10}
+      - AUTH_FAILURE_WINDOW=${AUTH_FAILURE_WINDOW:-300}
+
+      # ── Umbrales del motor de reglas ──────────────────────────────────────
+      - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-1200}
+      - MAX_HIGH_VULNS=${MAX_HIGH_VULNS:-10}
+      - MAX_MEDIUM_VULNS=${MAX_MEDIUM_VULNS:-30}
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:8000/health', timeout=4); sys.exit(0 if r.status == 200 else 1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── PostgreSQL — Base de datos persistente ────────────────────────────────
+  # Activar con: --profile postgres
+  # Cambiar DATABASE_URL en .env a:
+  #   postgresql+asyncpg://sentinel:sentinel@db:5432/sentinel
+  db:
+    image: postgres:16-alpine
+    container_name: sentinel-local-db
+    profiles: [postgres]
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-sentinel}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-sentinel}
+      - POSTGRES_DB=${POSTGRES_DB:-sentinel}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ollama-data:
+  sentinel-data:
+  postgres-data:

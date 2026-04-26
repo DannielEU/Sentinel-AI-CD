@@ -11,14 +11,25 @@
 
 Intelligent security gate for CI/CD pipelines. Analyses Docker container images and decides whether a deployment should be **APPROVED**, **WARNING**, or **REJECTED** — combining deterministic OWASP rules, Dockerfile secrets detection, a CVE whitelist, scan history, and an optional AI provider (Ollama, OpenAI, or Anthropic).
 
-```
-CI/CD pipeline
-    └─ trivy scan
-        └─ POST /analyze-image
-            ├─ Secrets detector  → REJECTED if hardcoded credentials found
-            ├─ CVE whitelist     → loaded from DB (optional)
-            ├─ Rule engine       → OWASP-aligned deterministic rules
-            └─ AI provider       → Ollama / OpenAI / Anthropic (optional)
+```mermaid
+flowchart LR
+  A[CI/CD Pipeline] --> B[Trivy Scan]
+  B --> C[POST /analyze-image]
+  C --> D[Secrets Detector]
+  C --> E[CVE Whitelist]
+  C --> F[Rule Engine OWASP]
+  C --> G[AI Provider Optional]
+
+  D --> H{Secrets Found?}
+  H -->|Yes| I[REJECTED]
+  H -->|No| E
+
+  E --> F
+  F --> J{Needs AI Context?}
+  J -->|Yes| G
+  J -->|No| K[Deterministic Decision]
+  G --> L[Final Gate Decision]
+  K --> L
 ```
 
 ---
@@ -36,6 +47,138 @@ CI/CD pipeline
 | **No-DB mode** | Works without a database — history and whitelist simply disabled, logs clearly say so |
 | **Hexagonal architecture** | Domain / Application / Infrastructure / Web layers, fully decoupled |
 | **Auth + rate limiting** | Bearer token, SHA-256 constant-time comparison, 100 req/min, auth-failure backoff |
+
+---
+
+## Topologia y Arquitectura
+
+### 1) Topologia de ejecucion (runtime)
+
+```mermaid
+flowchart TB
+  subgraph CI[CI/CD Runner]
+    P1[Build Image]
+    P2[Trivy]
+    P3[trivy_to_gate.py]
+  end
+
+  subgraph Gate[Sentinel Gate - FastAPI]
+    API[/POST analyze-image/]
+    APP[Gate Service]
+    SEC[Secrets Detector]
+    RULES[Rule Engine]
+    AI[AI Adapter]
+    REPO[Repository Adapter]
+  end
+
+  subgraph Data[Persistence]
+    DB[(SQLite/PostgreSQL)]
+    WL[(CVE Exceptions)]
+    HIST[(Scan History)]
+  end
+
+  subgraph Models[AI Backends]
+    OLL[Ollama Local]
+    OAI[OpenAI]
+    ANT[Anthropic]
+  end
+
+  P1 --> P2 --> P3 --> API
+  API --> APP
+  APP --> SEC
+  APP --> RULES
+  APP --> AI
+  APP --> REPO
+  REPO --> DB
+  DB --> WL
+  DB --> HIST
+  AI --> OLL
+  AI --> OAI
+  AI --> ANT
+```
+
+### 2) Arquitectura hexagonal del proyecto
+
+```mermaid
+flowchart LR
+  subgraph Web[Web Layer]
+    CTRL[FastAPI Controllers]
+  end
+
+  subgraph App[Application Layer]
+    SVC[GateService Orchestrator]
+  end
+
+  subgraph Domain[Domain Layer]
+    ENT[Entities]
+    POL[Security Policies and Rules]
+    PORTS[Ports / Protocols]
+  end
+
+  subgraph Infra[Infrastructure Layer]
+    AIP[AI Providers]
+    PERS[SQL/Null Repository]
+    DET[Secrets Detector]
+  end
+
+  CTRL --> SVC
+  SVC --> ENT
+  SVC --> POL
+  SVC --> PORTS
+  PORTS --> AIP
+  PORTS --> PERS
+  SVC --> DET
+```
+
+### 3) Flujo de decision de seguridad
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant CI as CI Pipeline
+  participant G as Sentinel API
+  participant S as Secrets Detector
+  participant R as Rule Engine
+  participant A as AI Provider
+  participant D as Database
+
+  CI->>G: POST /analyze-image (Trivy + Dockerfile)
+  G->>S: Scan Dockerfile
+  alt Secrets found
+    S-->>G: REJECTED
+    G->>D: Persist decision
+    G-->>CI: REJECTED
+  else No secrets
+    G->>D: Load CVE whitelist
+    G->>R: Evaluate deterministic rules
+    alt Critical or hard threshold reached
+      R-->>G: REJECTED
+      G->>D: Persist decision
+      G-->>CI: REJECTED
+    else Warning or ambiguous context
+      G->>A: Request contextual analysis
+      A-->>G: APPROVED/WARNING/REJECTED
+      G->>D: Persist decision
+      G-->>CI: Final decision
+    end
+  end
+```
+
+### 4) Flujo de integracion CI/CD a despliegue
+
+```mermaid
+flowchart LR
+  A[Commit or Pull Request] --> B[Build Docker Image]
+  B --> C[Trivy Scan]
+  C --> D[Send report to Sentinel]
+  D --> E{Gate Decision}
+  E -->|APPROVED| F[Deploy]
+  E -->|WARNING| G[Deploy with remediation ticket]
+  E -->|REJECTED| H[Block release and fix issues]
+  F --> I[Dashboard and historical trace]
+  G --> I
+  H --> I
+```
 
 ---
 
@@ -141,34 +284,27 @@ INFO | Mode: rules + AI only, no persistence
 
 ## Decision Pipeline
 
-```
-POST /analyze-image
-        │
-        ▼
-1. Dockerfile secrets scan
-   └─ Any found? → REJECTED (source: secrets_detector) → persist → return
-        │ none
-        ▼
-2. Load CVE whitelist from DB (if DATABASE_URL is set)
-        │
-        ▼
-3. Deterministic rule engine
-   ├── Critical > 0          → REJECTED (hard stop, AI cannot override)
-   ├── High > MAX_HIGH_VULNS → REJECTED (unless whitelisted CVEs reduce count below threshold)
-   ├── High 1..MAX           → WARNING  → delegate to AI (if enabled)
-   ├── Size > MAX_SIZE_MB    → WARNING  → delegate to AI
-   ├── Medium > MAX_MEDIUM   → WARNING  → delegate to AI
-   └── No rule fires         → AI analysis or APPROVED (if AI disabled)
-        │
-        ▼
-4. AI provider (Ollama / OpenAI / Anthropic)
-   └─ Can confirm WARNING, escalate to REJECTED, or downgrade to APPROVED
-        │
-        ▼
-5. Persist ScanRecord to DB (if available)
-        │
-        ▼
-6. Return GateDecision + dashboard_url (if DB enabled)
+```mermaid
+flowchart TD
+    A[POST /analyze-image] --> B[1. Secrets Scan]
+    B --> C{Secrets Found?}
+    C -->|Yes| D[REJECTED: secrets_detector]
+    C -->|No| E[2. Load CVE Whitelist]
+
+    E --> F[3. Rule Engine]
+    F --> G{Critical or hard threshold?}
+    G -->|Yes| H[REJECTED: rule_engine]
+    G -->|No| I{Warning context or no hit?}
+
+    I -->|AI Disabled| J[Deterministic APPROVED/WARNING]
+    I -->|AI Enabled| K[4. AI Analysis]
+    K --> L[AI can confirm/escalate/downgrade]
+
+    D --> M[5. Persist ScanRecord if DB enabled]
+    H --> M
+    J --> M
+    L --> M
+    M --> N[6. Return GateDecision + dashboard_url]
 ```
 
 ---
@@ -386,40 +522,47 @@ AI_PROVIDER=disabled docker compose up gate
 
 ## Project Structure
 
-```
-app/
-├── domain/                         # Core — no external dependencies
-│   ├── entities.py                 # ImageReport, GateDecision, ScanRecord, CVEException
-│   ├── rules.py                    # Deterministic OWASP rule engine + whitelist support
-│   └── ports/
-│       ├── ai_provider.py          # AIProviderPort Protocol
-│       └── repository.py           # RepositoryPort Protocol
-├── application/
-│   └── gate_service.py             # Orchestrator: secrets → whitelist → rules → AI → persist
-├── infrastructure/
-│   ├── ai/
-│   │   ├── factory.py              # Provider detection at startup (before model pull)
-│   │   ├── ollama.py               # Local Ollama adapter
-│   │   ├── openai_provider.py      # OpenAI REST adapter (no SDK, uses httpx)
-│   │   ├── anthropic_provider.py   # Anthropic REST adapter (no SDK, uses httpx)
-│   │   ├── prompt.py               # Shared prompt builder
-│   │   └── parser.py               # Shared AI response JSON parser
-│   ├── persistence/
-│   │   ├── factory.py              # DB detection at startup
-│   │   ├── null_repository.py      # No-op adapter (DATABASE_URL not set)
-│   │   └── sql_repository.py       # SQLAlchemy async (SQLite + PostgreSQL)
-│   └── security/
-│       └── secrets_detector.py     # Regex-based Dockerfile secret scanner
-└── web/
-    └── main.py                     # FastAPI thin controller, all endpoints
+```mermaid
+flowchart TB
+  ROOT[Sentinel-AI-CD]
+  ROOT --> APP[app]
+  ROOT --> PIPE[pipeline]
+  ROOT --> SCHEMA[schema.sql]
+  ROOT --> DC[docker-compose.yml]
+  ROOT --> REQ[requirements.txt]
 
-pipeline/
-├── trivy_to_gate.py                # Trivy JSON → Gate adapter (CI/CD script)
-└── gate_check.sh                   # Universal shell wrapper
+  APP --> D1[domain]
+  APP --> A1[application]
+  APP --> I1[infrastructure]
+  APP --> W1[web]
 
-schema.sql                          # Database schema (SQLite + PostgreSQL compatible)
-docker-compose.yml
-requirements.txt
+  D1 --> D2[entities.py]
+  D1 --> D3[rules.py]
+  D1 --> D4[ports]
+
+  A1 --> A2[gate_service.py]
+
+  I1 --> I2[ai]
+  I1 --> I3[persistence]
+  I1 --> I4[security]
+
+  I2 --> I2A[factory.py]
+  I2 --> I2B[ollama.py]
+  I2 --> I2C[openai_provider.py]
+  I2 --> I2D[anthropic_provider.py]
+  I2 --> I2E[prompt.py]
+  I2 --> I2F[parser.py]
+
+  I3 --> I3A[factory.py]
+  I3 --> I3B[null_repository.py]
+  I3 --> I3C[sql_repository.py]
+
+  I4 --> I4A[secrets_detector.py]
+
+  W1 --> W2[main.py]
+
+  PIPE --> P1[trivy_to_gate.py]
+  PIPE --> P2[gate_check.sh]
 ```
 
 ---
@@ -449,3 +592,19 @@ cve_exceptions  -- CVE whitelist with optional expiry
 - Container runs as non-root (`gateuser:1000`)
 - No data sent to third parties when using Ollama
 - CVE exceptions require a human-readable `reason` field and can include an expiry date
+
+---
+
+## Por Que Sentinel Es Diferente y Mejor
+
+- Security by design: combina reglas deterministicas con IA contextual, pero mantiene hard-stops que la IA no puede sobreescribir.
+- Menos falsos positivos operativos: whitelist de CVEs con expiracion y trazabilidad para excepciones justificadas.
+- Listo para entornos reales: funciona con o sin base de datos y con IA local o cloud sin cambiar el contrato del API.
+- Integracion CI/CD directa: salida con codigos de retorno claros, marcador para dashboard y adaptador dedicado para Trivy.
+- Trazabilidad completa: historial por imagen, tendencia de riesgo y evidencia centralizada para auditoria tecnica.
+- Flexibilidad arquitectonica: diseño hexagonal que facilita pruebas, evolucion de proveedores y mantenimiento.
+
+## Creadores
+
+- Daniel Eduardo Useche
+- Juan Diego Rodriguez
