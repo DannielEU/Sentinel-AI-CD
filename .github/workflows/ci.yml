@@ -43,21 +43,21 @@ jobs:
           python -m py_compile app/schemas.py
           python -m py_compile app/rule_engine.py
           python -m py_compile app/ollama_client.py
-          echo "✅ All Python files have valid syntax"
+          echo " All Python files have valid syntax"
 
       - name: Validate Docker configuration
         run: |
           docker build --help > /dev/null
-          echo "✅ Docker available"
+          echo " Docker available"
 
       - name: Validate docker-compose configuration
         run: |
           pip install pyyaml -q
-          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))" && echo "✅ docker-compose.yml is valid"
+          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))" && echo " docker-compose.yml is valid"
 
       - name: Validate GitHub workflow
         run: |
-          python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" && echo "✅ CI workflow is valid"
+          python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" && echo " CI workflow is valid"
 
   # ─────────────────────────────────────────────────────────────────────────
   # 2. Security Gate (Trivy → Sentinel)
@@ -115,21 +115,38 @@ jobs:
       - name: Start Sentinel services (Ollama + Gate) via docker-compose
         run: |
           cd Sentinel-AI-CD
+
+          echo "🚀 Starting docker-compose services..."
           docker-compose up -d
 
-          # Wait for gate service health endpoint (max 30 seconds)
-          echo "Waiting for Sentinel gate to be ready..."
-          for i in $(seq 1 15); do
-            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-              echo "✅ Gate is ready"
+          echo ""
+          echo "⏳ Waiting for Sentinel gate to be ready (max 60 seconds)..."
+          GATE_READY=false
+          for i in $(seq 1 30); do
+            echo "  [$i/30] Checking http://localhost:8000/health..."
+            if curl -sf http://localhost:8000/health 2>/dev/null | grep -q "status"; then
+              echo "✅ Gate is healthy!"
+              GATE_READY=true
               break
             fi
-            echo "Attempt $i: Gate not ready, waiting..."
+            echo "       → Not ready yet, waiting 2 seconds..."
             sleep 2
           done
 
-          # Verify services are running
+          if [ "$GATE_READY" = "false" ]; then
+            echo ""
+            echo "❌ ERROR: Gate did not start. Docker logs:"
+            echo "=========================================="
+            docker-compose logs
+            echo "=========================================="
+            exit 1
+          fi
+
+          echo ""
+          echo "📊 Service Status:"
           docker-compose ps
+          echo ""
+          echo "✅ All services ready!"
         env:
           AI_DISABLED: ${{ env.AI_ENABLED == 'true' && 'false' || 'true' }}
           OLLAMA_URL: http://ollama:11434
@@ -138,12 +155,25 @@ jobs:
           MAX_HIGH_VULNS: ${{ env.MAX_HIGH_VULNS }}
           MAX_MEDIUM_VULNS: ${{ env.MAX_MEDIUM_VULNS }}
 
+      # ── Verify gate is accessible ───────────────────────────────────────────
+      - name: Verify gate connectivity
+        run: |
+          echo "Testing gate at http://localhost:8000..."
+          curl -v http://localhost:8000/health || echo "❌ Gate not accessible"
+          echo ""
+
       # ── Call the gate via trivy_to_gate.py ───────────────────────────────
       - name: Run Sentinel security gate
         id: gate
         # exit 2 (WARNING) → capture, pipeline continues
         # exit 1 (REJECTED) → saved to output, pipeline fails AFTER comment is posted
         run: |
+          echo "📤 Sending security report to gate..."
+          echo "Gate URL: $GATE_URL"
+          echo "Report file: trivy_report.json"
+          echo "Image: ${{ steps.vars.outputs.image_name }}"
+          echo ""
+
           set +e
           python3 Sentinel-AI-CD/pipeline/trivy_to_gate.py \
             --report trivy_report.json \
@@ -152,6 +182,9 @@ jobs:
             --dockerfile ./Dockerfile
           GATE_EXIT=$?
           set -e
+
+          echo ""
+          echo "Gate exit code: $GATE_EXIT"
 
           case $GATE_EXIT in
             0) echo "gate_decision=APPROVED" >> $GITHUB_OUTPUT
