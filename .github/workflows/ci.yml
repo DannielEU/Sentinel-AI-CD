@@ -127,6 +127,19 @@ jobs:
           cd Sentinel-AI-CD
 
           echo "🚀 Starting docker compose services..."
+          echo "🔍 DEBUG: AI_DISABLED=$AI_DISABLED (should be 'false')"
+          echo "🔍 DEBUG: OLLAMA_MODEL=$OLLAMA_MODEL (should be 'mistral')"
+          echo ""
+
+          # Export all variables so docker-compose reads them from the environment
+          export AI_DISABLED
+          export OLLAMA_MODEL
+          export OLLAMA_URL="http://ollama:11434"
+          export OLLAMA_DATA_PATH="${GITHUB_WORKSPACE}/Sentinel-AI-CD/ollama-data"
+          export MAX_IMAGE_SIZE_MB
+          export MAX_HIGH_VULNS
+          export MAX_MEDIUM_VULNS
+
           docker compose up -d
 
           echo ""
@@ -151,6 +164,26 @@ jobs:
             echo "=========================================="
             exit 1
           fi
+
+          # Verify that AI_DISABLED was correctly passed to the container
+          echo ""
+          echo "🔍 Checking environment variables in gate container..."
+          GATE_AI_DISABLED=$(docker compose exec -T gate env | grep '^AI_DISABLED=' | cut -d'=' -f2)
+          GATE_OLLAMA_MODEL=$(docker compose exec -T gate env | grep '^OLLAMA_MODEL=' | cut -d'=' -f2)
+          echo "  AI_DISABLED in gate container: $GATE_AI_DISABLED"
+          echo "  OLLAMA_MODEL in gate container: $GATE_OLLAMA_MODEL"
+
+          if [ "$GATE_AI_DISABLED" != "false" ]; then
+            echo ""
+            echo "❌ ERROR: AI_DISABLED was not correctly passed to the container!"
+            echo "   Expected: false"
+            echo "   Got: $GATE_AI_DISABLED"
+            echo ""
+            echo "This explains why the AI system is not being used."
+            exit 1
+          fi
+          echo "✅ Environment variables correctly set in gate container"
+          echo ""
 
           # ── Ollama readiness check ──────────────────────────────────────
           OLLAMA_PORT="${OLLAMA_PORT:-11435}"
