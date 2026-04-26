@@ -567,23 +567,39 @@ jobs:
               if len(crit_high) > 25:
                   pr_lines.append(f"_…and {len(crit_high)-25} more — see the full artifact report._")
 
-          # ── Include AI analysis feedback if available ────────────────────────
+          # ── Include gate feedback (AI or rule engine) ────────────────────────
           try:
               with open("gate_response.json") as f:
                   gate_resp = json.load(f)
 
               reason = gate_resp.get("reason", "")
               recommendations = gate_resp.get("recommendations", [])
+              ai_summary = gate_resp.get("summary", "")
+              source = gate_resp.get("source", "rule_engine")
 
-              if reason or recommendations:
-                  pr_lines += ["", "### 🤖 AI Analysis Feedback"]
+              # Header reflects the actual source: ai_model when AI made the call,
+              # otherwise rule engine (which may still have an AI-enriched summary).
+              if source == "ai_model":
+                  header = "### 🤖 AI Analysis Feedback"
+              else:
+                  header = "### 📋 Rule Engine Decision"
+
+              if reason or recommendations or ai_summary:
+                  pr_lines += ["", header]
+                  if source == "ai_model":
+                      pr_lines.append("_Decision made by the AI model after contextual analysis._")
                   if reason:
+                      pr_lines.append("")
                       pr_lines.append(f"**Analysis:** {reason}")
                   if recommendations:
                       pr_lines.append("")
                       pr_lines.append("**Recommendations:**")
                       for i, rec in enumerate(recommendations, 1):
                           pr_lines.append(f"  {i}. {rec}")
+                  if ai_summary:
+                      pr_lines.append("")
+                      pr_lines.append("**Summary:**")
+                      pr_lines.append(f"> {ai_summary}")
           except (FileNotFoundError, json.JSONDecodeError):
               pass  # Gate response not available or invalid
 

@@ -283,50 +283,48 @@ async def analyze_image(
             "Rule engine decision for %s: %s", report.image_name, rule_result.decision
         )
 
-        # For WARNING decisions, try to get AI-enriched summary if AI is enabled
-        ai_summary = rule_result.summary
-        ai_attempted = False
-        ai_succeeded = False
+        # REJECTED is a hard policy decision (Critical>0 or High>MAX_HIGH_VULNS).
+        # Never override with AI — safety must stay deterministic.
+        if rule_result.decision == "REJECTED":
+            return GateDecision(
+                decision=rule_result.decision,
+                reason=rule_result.reason,
+                recommendations=rule_result.recommendations,
+                summary=rule_result.summary,
+                source="rule_engine",
+                image_name=report.image_name,
+            )
 
-        if (
-            rule_result.decision == "WARNING"
-            and not AI_DISABLED
-        ):
-            ai_attempted = True
+        # WARNING is contextual — defer to AI for the full decision when enabled.
+        # The AI can confirm WARNING, escalate, or downgrade based on CVE specifics,
+        # base image quality, and other factors the rule engine can't reason about.
+        if rule_result.decision == "WARNING" and not AI_DISABLED:
+            logger.info(
+                "Rule engine flagged WARNING for %s — delegating final decision to AI.",
+                report.image_name,
+            )
             try:
-                ai_generated_summary = await ollama_client.generate_summary(
-                    report, rule_result.decision, rule_result.reason
+                ai_decision = await ollama_client.analyze(report)
+                logger.info(
+                    "✅ AI MODEL DECISION for %s: %s (overrode rule engine WARNING)",
+                    report.image_name,
+                    ai_decision.decision,
                 )
-                if ai_generated_summary:
-                    ai_summary = ai_generated_summary
-                    ai_succeeded = True
-                    logger.info(
-                        "✅ AI ENRICHED SUMMARY: Ollama responded successfully for %s",
-                        report.image_name,
-                    )
-                else:
-                    logger.warning(
-                        "⚠️  OLLAMA FALLBACK: No summary from Ollama for %s — using rule engine default",
-                        report.image_name,
-                    )
+                return ai_decision
             except Exception as exc:
                 logger.warning(
-                    "⚠️  OLLAMA FALLBACK: AI summary generation failed for %s — using rule engine default. Error: %s",
+                    "⚠️  AI FALLBACK: AI analysis failed for %s — falling back to rule engine WARNING. Error: %s",
                     report.image_name,
                     exc,
                 )
-                # Service continues — using rule_result.summary as fallback
-        elif rule_result.decision == "WARNING" and AI_DISABLED:
-            logger.info(
-                "🚫 AI DISABLED: Summary for %s is from rule engine (AI is disabled)",
-                report.image_name,
-            )
+                # Fall through to rule engine result below
 
+        # AI disabled or AI failed — return rule engine WARNING with optional summary enrichment
         return GateDecision(
             decision=rule_result.decision,
             reason=rule_result.reason,
             recommendations=rule_result.recommendations,
-            summary=ai_summary,
+            summary=rule_result.summary,
             source="rule_engine",
             image_name=report.image_name,
         )
