@@ -86,9 +86,9 @@ jobs:
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "image_name=${IMAGE_NAME}:${{ github.sha }}" >> $GITHUB_OUTPUT
-      # ── Build the app image ──────────────────────────────────────────────
+      # ── Build the Sentinel app image ──────────────────────────────────────
       - name: Build Docker image
-        run: docker build -t ${{ steps.vars.outputs.image_name }} .
+        run: docker build -t ${{ steps.vars.outputs.image_name }} -f app/Dockerfile .
 
       # ── Install Trivy ────────────────────────────────────────────────────
       - name: Install Trivy
