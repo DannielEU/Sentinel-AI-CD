@@ -169,10 +169,35 @@ jobs:
 
           if [ "$OLLAMA_READY" = "false" ]; then
             echo ""
-            echo "❌ ERROR: Ollama did not become ready. Ollama container logs:"
-            echo "=========================================="
-            docker compose logs ollama
-            echo "=========================================="
+            echo "❌ ERROR: Ollama did not become ready after 120 seconds!"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📋 DOCKER COMPOSE STATUS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            docker compose ps -a
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🐳 OLLAMA CONTAINER LOGS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            docker compose logs ollama --tail=50
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🚪 PORT DIAGNOSTICS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            netstat -tlnp 2>/dev/null | grep -E ":(8000|11435)" || echo "netstat not available, trying ss..."
+            ss -tlnp 2>/dev/null | grep -E ":(8000|11435)" || echo "No services found on ports 8000/11435"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🔗 CONNECTIVITY TEST:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Testing http://localhost:${OLLAMA_PORT}/api/tags..."
+            curl -v http://localhost:${OLLAMA_PORT}/api/tags 2>&1 | head -30 || echo "CURL FAILED"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🐳 GATE CONTAINER LOGS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            docker compose logs gate --tail=30 || true
+            echo ""
             exit 1
           fi
 
@@ -183,8 +208,66 @@ jobs:
             echo "✅ Model '$MODEL' already present in cache — skipping pull."
           else
             echo "📥 Model '$MODEL' not found — pulling now (this may take several minutes on first run)..."
-            docker compose exec -T ollama ollama pull "${MODEL}"
-            echo "✅ Model pull complete."
+            if docker compose exec -T ollama ollama pull "${MODEL}"; then
+              echo "✅ Model pull complete."
+            else
+              echo "❌ ERROR: Model pull failed!"
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "📋 OLLAMA LOGS (last 50 lines):"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              docker compose logs ollama --tail=50
+              echo ""
+              exit 1
+            fi
+          fi
+
+          # ── Verify AI is actually working (if enabled) ─────────────────────
+          if [ "$AI_DISABLED" = "false" ]; then
+            echo ""
+            echo "🤖 AI is ENABLED — verifying gate can communicate with Ollama..."
+            TEST_PAYLOAD=$(cat <<'TEST_PAYLOAD_EOF'
+          {
+            "image_name": "test:latest",
+            "image_size_mb": 100,
+            "vulnerabilities": {"critical": 0, "high": 5, "medium": 10, "low": 20},
+            "base_image": "alpine:3.18",
+            "os_family": "alpine"
+          }
+          TEST_PAYLOAD_EOF
+            )
+
+            if curl -sf -X POST http://localhost:8000/analyze-image \
+              -H "Content-Type: application/json" \
+              -d "$TEST_PAYLOAD" > /tmp/ai_test.json 2>&1; then
+              DECISION=$(grep -o '"decision":"[^"]*' /tmp/ai_test.json | cut -d'"' -f4)
+              if [ -n "$DECISION" ]; then
+                echo "✅ AI communication verified — decision: $DECISION"
+              else
+                echo "❌ AI endpoint responded but decision missing!"
+                cat /tmp/ai_test.json
+                exit 1
+              fi
+            else
+              echo "❌ ERROR: Gate AI endpoint failed!"
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "🔗 GATE RESPONSE:"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              cat /tmp/ai_test.json || echo "(no response)"
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "🐳 GATE LOGS:"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              docker compose logs gate --tail=30
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "🐳 OLLAMA LOGS:"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              docker compose logs ollama --tail=30
+              echo ""
+              exit 1
+            fi
           fi
 
           echo ""
