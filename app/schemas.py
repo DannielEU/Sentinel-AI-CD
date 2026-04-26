@@ -51,5 +51,6 @@ class GateDecision(BaseModel):
     decision: str = Field(..., pattern=r'^(APPROVED|WARNING|REJECTED)$', description="APPROVED | WARNING | REJECTED")
     reason: str = Field(..., max_length=500, description="Short explanation of the decision")
     recommendations: list[str] = Field(default_factory=list, max_length=5, description="List of actionable recommendations (max 5)")
+    summary: Optional[str] = Field(default=None, max_length=1000, description="General summary message or closure")
     source: str = Field(default="rule_engine", pattern=r'^(rule_engine|ai_model)$', description="rule_engine | ai_model")
     image_name: str = Field(..., max_length=255, description="Image that was analysed")

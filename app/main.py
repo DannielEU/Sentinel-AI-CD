@@ -282,10 +282,29 @@ async def analyze_image(
         logger.info(
             "Rule engine decision for %s: %s", report.image_name, rule_result.decision
         )
+
+        # For WARNING decisions, try to get AI-enriched summary if AI is enabled
+        ai_summary = rule_result.summary
+        if (
+            rule_result.decision == "WARNING"
+            and not AI_DISABLED
+        ):
+            try:
+                ai_generated_summary = await ollama_client.generate_summary(
+                    report, rule_result.decision, rule_result.reason
+                )
+                if ai_generated_summary:
+                    ai_summary = ai_generated_summary
+                    logger.info("AI enriched summary for %s", report.image_name)
+            except Exception as exc:
+                logger.debug("AI summary generation failed for %s: %s", report.image_name, exc)
+                # fallback to rule_result.summary
+
         return GateDecision(
             decision=rule_result.decision,
             reason=rule_result.reason,
             recommendations=rule_result.recommendations,
+            summary=ai_summary,
             source="rule_engine",
             image_name=report.image_name,
         )
