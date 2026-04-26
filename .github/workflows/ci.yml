@@ -9,13 +9,13 @@ on:
 env:
   IMAGE_NAME: ${{ github.repository }}:${{ github.sha }}
   GATE_URL: http://localhost:8000
-  # AI Model Configuration
-  OLLAMA_MODEL: mistral  # Models: mistral (recommended), neural-chat, llama2
-  AI_ENABLED: "true"          # Set to "true" to enable AI analysis with Ollama; "false" for rule-engine only
-  # Security Thresholds (configurable)
-  MAX_IMAGE_SIZE_MB: "1200"   # Warn if image exceeds this size
-  MAX_HIGH_VULNS: "10"        # Reject if HIGH vulns > this value
-  MAX_MEDIUM_VULNS: "30"      # Warn if MEDIUM vulns > this value
+  # AI Provider: ollama | openai | anthropic | disabled
+  OLLAMA_MODEL: mistral
+  AI_ENABLED: "true"           # true → AI_PROVIDER=ollama, false → AI_PROVIDER=disabled
+  # Security Thresholds
+  MAX_IMAGE_SIZE_MB: "1200"
+  MAX_HIGH_VULNS: "10"
+  MAX_MEDIUM_VULNS: "30"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
@@ -39,11 +39,9 @@ jobs:
 
       - name: Validate Python syntax
         run: |
-          python -m py_compile app/main.py
-          python -m py_compile app/schemas.py
-          python -m py_compile app/rule_engine.py
-          python -m py_compile app/ollama_client.py
-          echo " All Python files have valid syntax"
+          find app/ -name "*.py" -exec python -m py_compile {} \;
+          python -m py_compile pipeline/trivy_to_gate.py
+          echo "✅ All Python files have valid syntax"
 
       - name: Validate Docker configuration
         run: |
@@ -130,12 +128,12 @@ jobs:
           cd Sentinel-AI-CD
 
           echo "🚀 Starting docker compose services..."
-          echo "🔍 DEBUG: AI_DISABLED=$AI_DISABLED (should be 'false')"
+          echo "🔍 DEBUG: AI_PROVIDER=$AI_PROVIDER (should be 'ollama' when AI is enabled)"
           echo "🔍 DEBUG: OLLAMA_MODEL=$OLLAMA_MODEL (should be 'mistral')"
           echo ""
 
           # Export all variables so docker-compose reads them from the environment
-          export AI_DISABLED
+          export AI_PROVIDER
           export OLLAMA_MODEL
           export OLLAMA_URL="http://ollama:11434"
           export OLLAMA_DATA_PATH="${GITHUB_WORKSPACE}/Sentinel-AI-CD/ollama-data"
@@ -168,21 +166,19 @@ jobs:
             exit 1
           fi
 
-          # Verify that AI_DISABLED was correctly passed to the container
+          # Verify that AI_PROVIDER was correctly passed to the container
           echo ""
           echo "🔍 Checking environment variables in gate container..."
-          GATE_AI_DISABLED=$(docker compose exec -T gate env | grep '^AI_DISABLED=' | cut -d'=' -f2)
+          GATE_AI_PROVIDER=$(docker compose exec -T gate env | grep '^AI_PROVIDER=' | cut -d'=' -f2)
           GATE_OLLAMA_MODEL=$(docker compose exec -T gate env | grep '^OLLAMA_MODEL=' | cut -d'=' -f2)
-          echo "  AI_DISABLED in gate container: $GATE_AI_DISABLED"
+          echo "  AI_PROVIDER in gate container: $GATE_AI_PROVIDER"
           echo "  OLLAMA_MODEL in gate container: $GATE_OLLAMA_MODEL"
 
-          if [ "$GATE_AI_DISABLED" != "false" ]; then
+          if [ "$GATE_AI_PROVIDER" = "disabled" ] && [ "$AI_PROVIDER" != "disabled" ]; then
             echo ""
-            echo "❌ ERROR: AI_DISABLED was not correctly passed to the container!"
-            echo "   Expected: false"
-            echo "   Got: $GATE_AI_DISABLED"
-            echo ""
-            echo "This explains why the AI system is not being used."
+            echo "❌ ERROR: AI_PROVIDER was not correctly passed to the container!"
+            echo "   Expected: $AI_PROVIDER"
+            echo "   Got: $GATE_AI_PROVIDER"
             exit 1
           fi
           echo "✅ Environment variables correctly set in gate container"
@@ -261,9 +257,9 @@ jobs:
           fi
 
           # ── Verify AI is actually working (if enabled) ─────────────────────
-          if [ "$AI_DISABLED" = "false" ]; then
+          if [ "$AI_PROVIDER" != "disabled" ]; then
             echo ""
-            echo "🤖 AI is ENABLED — verifying Ollama directly..."
+            echo "🤖 AI is ENABLED (AI_PROVIDER=$AI_PROVIDER) — verifying Ollama directly..."
 
             # Test 1: Direct Ollama API call
             echo ""
@@ -361,8 +357,8 @@ jobs:
           echo ""
           echo "✅ All services ready!"
         env:
-          # Invert AI_ENABLED to AI_DISABLED for the app: if AI is enabled, then AI_DISABLED=false
-          AI_DISABLED: ${{ env.AI_ENABLED == 'true' && 'false' || 'true' }}
+          # Map AI_ENABLED → AI_PROVIDER (new architecture)
+          AI_PROVIDER: ${{ env.AI_ENABLED == 'true' && 'ollama' || 'disabled' }}
           OLLAMA_URL: http://ollama:11434
           OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
           OLLAMA_DATA_PATH: ${{ github.workspace }}/Sentinel-AI-CD/ollama-data
@@ -497,7 +493,6 @@ jobs:
 
           decision   = os.environ.get("GATE_DECISION", "UNKNOWN")
           image_name = os.environ.get("IMAGE_NAME", "-")
-          ai_enabled = os.environ.get("AI_ENABLED", "false").lower() == "true"
 
           # ── Parse Trivy JSON ──────────────────────────────────────────────
           try:
@@ -535,7 +530,8 @@ jobs:
           ts   = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
           # ── PR comment (concise) ──────────────────────────────────────────
-          ai_status = "enabled (Mistral/neural-chat)" if ai_enabled else "disabled (rule-engine only)"
+          ai_provider = os.environ.get("AI_PROVIDER", "disabled")
+          ai_status = f"enabled ({ai_provider})" if ai_provider != "disabled" else "disabled (rule-engine only)"
           pr_lines = [
               f"## {icon} Sentinel Security Gate — {decision}",
               f"_Scanned: `{image_name}` · {ts} · AI analysis: {ai_status}_",
@@ -576,6 +572,10 @@ jobs:
               recommendations = gate_resp.get("recommendations", [])
               ai_summary = gate_resp.get("summary", "")
               source = gate_resp.get("source", "rule_engine")
+              dashboard_url = gate_resp.get("dashboard_url", "")
+
+              if dashboard_url:
+                  pr_lines += ["", f"### 📊 [Security Dashboard]({dashboard_url})"]
 
               # Header reflects the actual source: ai_model when AI made the call,
               # otherwise rule engine (which may still have an AI-enriched summary).
@@ -688,6 +688,7 @@ jobs:
         env:
           GATE_DECISION: ${{ steps.gate.outputs.gate_decision }}
           IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
+          AI_PROVIDER: ${{ env.AI_ENABLED == 'true' && 'ollama' || 'disabled' }}
 
       # ── Post comment on PR (always, even on REJECTED) ─────────────────────
       - name: Post security summary on PR
