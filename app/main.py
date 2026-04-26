@@ -19,9 +19,13 @@ Run
 import logging
 import os
 import secrets
+import hashlib
+import time
+from datetime import datetime, timedelta
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import rule_engine
@@ -34,27 +38,154 @@ logger = logging.getLogger(__name__)
 AI_DISABLED = os.getenv("AI_DISABLED", "false").lower() in {"1", "true", "yes", "on"}
 GATE_AUTH_TOKEN = os.getenv("GATE_AUTH_TOKEN")
 
+# Rate limiting configuration
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))  # requests per minute
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # seconds
+AUTH_FAILURE_LIMIT = int(os.getenv("AUTH_FAILURE_LIMIT", "5"))  # failed attempts
+AUTH_FAILURE_WINDOW = int(os.getenv("AUTH_FAILURE_WINDOW", "300"))  # seconds (5 min)
+
+# In-memory tracking for rate limiting and auth failures
+request_timestamps: dict[str, list[float]] = {}
+auth_failures: dict[str, list[float]] = {}
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract real client IP, accounting for proxies"""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Check if client has exceeded rate limit"""
+    now = time.time()
+
+    if client_ip not in request_timestamps:
+        request_timestamps[client_ip] = []
+
+    # Remove old timestamps outside window
+    request_timestamps[client_ip] = [
+        ts for ts in request_timestamps[client_ip]
+        if now - ts < RATE_LIMIT_WINDOW
+    ]
+
+    # Check limit
+    if len(request_timestamps[client_ip]) >= RATE_LIMIT_REQUESTS:
+        logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+        return False
+
+    # Add current timestamp
+    request_timestamps[client_ip].append(now)
+    return True
+
+
+def _check_auth_failures(client_ip: str) -> bool:
+    """Check if client has exceeded auth failure limit"""
+    now = time.time()
+
+    if client_ip not in auth_failures:
+        auth_failures[client_ip] = []
+
+    # Remove old failures outside window
+    auth_failures[client_ip] = [
+        ts for ts in auth_failures[client_ip]
+        if now - ts < AUTH_FAILURE_WINDOW
+    ]
+
+    # Check limit
+    if len(auth_failures[client_ip]) >= AUTH_FAILURE_LIMIT:
+        logger.warning(f"Auth failure limit exceeded for IP: {client_ip}")
+        return False
+
+    return True
+
+
+def _record_auth_failure(client_ip: str) -> None:
+    """Record an authentication failure"""
+    now = time.time()
+    if client_ip not in auth_failures:
+        auth_failures[client_ip] = []
+    auth_failures[client_ip].append(now)
+    logger.warning(f"Auth failure recorded for IP: {client_ip}")
+
+
+def _hash_token(token: str) -> str:
+    """Hash token using SHA-256 (for secure comparison)"""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _require_token(authorization: str | None, client_ip: str) -> None:
+    """Validate bearer token with rate limiting"""
+    if not GATE_AUTH_TOKEN:
+        return
+
+    # Check auth failure limit first
+    if not _check_auth_failures(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many authentication failures. Please try again later."
+        )
+
+    if not authorization or not authorization.startswith("Bearer "):
+        _record_auth_failure(client_ip)
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid bearer token format"
+        )
+
+    provided_token = authorization.removeprefix("Bearer ").strip()
+
+    # Use constant-time comparison with hashed tokens
+    provided_hash = _hash_token(provided_token)
+    expected_hash = _hash_token(GATE_AUTH_TOKEN)
+
+    if not secrets.compare_digest(provided_hash, expected_hash):
+        _record_auth_failure(client_ip)
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid authentication token"
+        )
+
+    # Clear auth failures on success
+    if client_ip in auth_failures:
+        auth_failures[client_ip] = []
+
 app = FastAPI(
     title="AI DevSecOps Deployment Gate",
     description=(
         "Intelligent CI/CD gate that analyses container-image security reports "
-        "using deterministic rules and a local Mistral LLM (via Ollama) to decide "
+        "using deterministic rules and a local LLM (via Ollama) to decide "
         "whether a deployment should be APPROVED, trigger a WARNING, or be REJECTED."
     ),
-    version="1.1.0",
+    version="1.3.0",
+    docs_url=None if os.getenv("DISABLE_DOCS", "false").lower() in {"1", "true"} else "/docs",
+    redoc_url=None,
 )
 
+# Rate limiting is handled manually in the route handlers
 
-def _require_token(authorization: str | None) -> None:
-    if not GATE_AUTH_TOKEN:
-        return
+# Configure CORS for CI/CD pipelines (restrict to localhost/CI environment)
+allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:8000,http://localhost:8080").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-
-    provided_token = authorization.removeprefix("Bearer ").strip()
-    if not secrets.compare_digest(provided_token, GATE_AUTH_TOKEN):
-        raise HTTPException(status_code=403, detail="Invalid bearer token")
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT_REQUESTS)
+    response.headers["X-RateLimit-Window"] = str(RATE_LIMIT_WINDOW)
+    return response
 
 
 @app.get("/", tags=["health"])
@@ -75,11 +206,22 @@ def health():
 )
 async def analyze_image(
     report: ImageReport,
+    request: Request,
     authorization: str | None = Header(default=None),
 ):
     """
     Receive a container-image security report from the CI/CD pipeline and
     return a gate decision.
+
+    ### Authentication
+    Include Bearer token in Authorization header:
+    ```
+    Authorization: Bearer <your-token>
+    ```
+
+    ### Rate Limiting
+    - Default: 100 requests per 60 seconds per IP
+    - Headers: X-RateLimit-Limit, X-RateLimit-Window
 
     ### Decision values
     | Value      | Pipeline behaviour            |
@@ -105,8 +247,33 @@ async def analyze_image(
     }
     ```
     """
-    _require_token(authorization)
-    logger.info("Received report for image: %s", report.image_name)
+    client_ip = _get_client_ip(request)
+
+    # Check rate limit
+    if not _check_rate_limit(client_ip):
+        logger.warning("Rate limit exceeded for IP: %s", client_ip)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded. Max {RATE_LIMIT_REQUESTS} requests per {RATE_LIMIT_WINDOW} seconds."
+        )
+
+    # Validate authentication
+    _require_token(authorization, client_ip)
+
+    # Validate report data
+    total_vulns = sum([
+        report.vulnerabilities.critical,
+        report.vulnerabilities.high,
+        report.vulnerabilities.medium,
+        report.vulnerabilities.low,
+        report.vulnerabilities.unknown,
+    ])
+    if total_vulns > 100000:
+        logger.warning("Suspicious report with %d vulnerabilities from %s (%s)",
+                      total_vulns, report.image_name, client_ip)
+        raise HTTPException(status_code=400, detail="Invalid vulnerability counts")
+
+    logger.info("Received report for image: %s from %s", report.image_name, client_ip)
 
     # ── 1. Deterministic rule engine ────────────────────────────────────────
     rule_result = rule_engine.evaluate(report)

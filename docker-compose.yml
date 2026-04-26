@@ -1,28 +1,35 @@
+# Docker Compose para Sentinel AI-CD
+# Compatible con: Local, Docker Compose, Azure Container Instances, Azure App Service
+# Variables configurables:
+#   - OLLAMA_PORT: Puerto para Ollama (default: 11434)
+#   - GATE_PORT: Puerto para FastAPI gate (default: 8000)
+#   - OLLAMA_MODEL: Modelo a usar (default: neural-chat)
+#   - AI_DISABLED: Deshabilitar IA (default: false)
+#   - GATE_AUTH_TOKEN: Token de autenticación (default: none)
+#   - MAX_IMAGE_SIZE_MB: Tamaño máximo de imagen (default: 1200)
+#   - MAX_HIGH_VULNS: Vulnerabilidades HIGH máximas (default: 10)
+#   - MAX_MEDIUM_VULNS: Vulnerabilidades MEDIUM máximas (default: 30)
+
 services:
 
-  # ── Ollama — local LLM server ───────────────────────────────────────────────
+  # ── Ollama — Local LLM Server (Local + Docker) ───────────────────────────────
+  # Para Azure Container Instances: descomentar si se desea usar Ollama remoto
+  # o dejar deshabilitado y usar API externa
   ollama:
     image: ollama/ollama:latest
     container_name: devsecops-ollama
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PORT:-11435}:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # Pull the mistral model on first start
-    entrypoint: >
-      sh -c "ollama serve &
-             sleep 5 &&
-             ollama pull mistral &&
-             wait"
-    healthcheck:
-      test: ["CMD", "sh", "-c", "curl -sf http://localhost:11434/api/tags || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+    environment:
+      - OLLAMA_KEEP_ALIVE=5m
+    # Nota: Límites de recursos configurables vía variables en Azure
+    # En docker-compose local, usar: docker run --cpus=2 --memory=4g
 
-  # ── AI Deployment Gate — FastAPI service ────────────────────────────────────
+  # ── AI Deployment Gate — FastAPI Service ───────────────────────────────────
+  # Compatible con: Local, Docker, Azure Container Instances, Azure App Service
   gate:
     build:
       context: .
@@ -30,12 +37,27 @@ services:
     container_name: devsecops-gate
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${GATE_PORT:-8000}:8000"
     environment:
-      - OLLAMA_URL=http://ollama:11434
+      # Para Ollama local (mapeo interno es 11434, externo es 11435)
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      # Para usar modelo distinto (neural-chat es mejor para seguridad + Docker)
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-neural-chat}
+      # Deshabilitar IA por defecto (activar cuando Ollama esté ready)
+      - AI_DISABLED=${AI_DISABLED:-true}
+      # Token de autenticación (opcional)
+      - GATE_AUTH_TOKEN=${GATE_AUTH_TOKEN:-}
+      # Rule engine thresholds
+      - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-1200}
+      - MAX_HIGH_VULNS=${MAX_HIGH_VULNS:-10}
+      - MAX_MEDIUM_VULNS=${MAX_MEDIUM_VULNS:-30}
+      # Rate limiting (DDoS protection)
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      - AUTH_FAILURE_LIMIT=${AUTH_FAILURE_LIMIT:-5}
+      - AUTH_FAILURE_WINDOW=${AUTH_FAILURE_WINDOW:-300}
     depends_on:
-      ollama:
-        condition: service_healthy
+      - ollama
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -43,6 +65,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    # Nota: Límites de recursos para Azure configurables vía variables
+    # En docker-compose local, usar: docker run --cpus=1 --memory=1g
 
 volumes:
   ollama_data:
