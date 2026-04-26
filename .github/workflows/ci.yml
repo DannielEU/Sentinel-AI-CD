@@ -50,10 +50,10 @@ jobs:
           docker build --help > /dev/null
           echo " Docker available"
 
-      - name: Validate docker-compose configuration
+      - name: Validate docker compose configuration
         run: |
           pip install pyyaml -q
-          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))" && echo " docker-compose.yml is valid"
+          python3 -c "import yaml; yaml.safe_load(open('docker compose.yml'))" && echo " docker compose.yml is valid"
 
       - name: Validate GitHub workflow
         run: |
@@ -111,13 +111,13 @@ jobs:
             --exit-code 0 \
             ${{ steps.vars.outputs.image_name }}
 
-      # ── Start Sentinel gate with docker-compose ──────────────────────────────
-      - name: Start Sentinel services (Ollama + Gate) via docker-compose
+      # ── Start Sentinel gate with docker compose ──────────────────────────────
+      - name: Start Sentinel services (Ollama + Gate) via docker compose
         run: |
           cd Sentinel-AI-CD
 
-          echo "🚀 Starting docker-compose services..."
-          docker-compose up -d
+          echo "🚀 Starting docker compose services..."
+          docker compose up -d
 
           echo ""
           echo "⏳ Waiting for Sentinel gate to be ready (max 60 seconds)..."
@@ -137,14 +137,14 @@ jobs:
             echo ""
             echo "❌ ERROR: Gate did not start. Docker logs:"
             echo "=========================================="
-            docker-compose logs
+            docker compose logs
             echo "=========================================="
             exit 1
           fi
 
           echo ""
           echo "📊 Service Status:"
-          docker-compose ps
+          docker compose ps
           echo ""
           echo "✅ All services ready!"
         env:
