@@ -12,8 +12,8 @@ from schemas import ImageReport, GateDecision
 
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = "mistral"
-REQUEST_TIMEOUT = 120  # seconds — Mistral can be slow on first token
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "neural-chat")
+REQUEST_TIMEOUT = 120  # seconds — neural-chat optimized for Docker/security analysis
 
 
 def _build_prompt(report: ImageReport) -> str:
@@ -35,31 +35,81 @@ def _build_prompt(report: ImageReport) -> str:
 
     extra = "\n".join(extra_sections)
 
-    return f"""You are a senior DevSecOps engineer responsible for approving or rejecting container image deployments in a CI/CD pipeline.
+    return f"""You are a senior DevSecOps and Container Security Engineer with expertise in:
+- Docker/Container security best practices
+- CVE analysis and severity assessment
+- CI/CD pipeline security gates
+- Kubernetes and container orchestration security
+- Supply chain security and container image provenance
 
-Analyse the following security report for a container image and provide a structured deployment decision.
+Your role is to approve or reject container image deployments in a CI/CD pipeline based on security analysis.
 
-## Image report
+## Analysis Guidelines
+
+**CRITICAL (0 found → APPROVED, >0 → REJECTED):**
+- Critical vulnerabilities require immediate remediation
+- If found, reject the deployment regardless of other factors
+- Recommend immediate patching or base image update
+
+**HIGH Severity (1-10 → WARNING, >10 → REJECTED):**
+- Between 1-10: Allow with warnings, schedule remediation
+- Over 10: Reject the deployment, too many unpatched vulnerabilities
+- Consider base image and package versions
+
+**MEDIUM Severity (≤30 → APPROVED, >30 → WARNING):**
+- Acceptable in most cases if below threshold
+- Monitor and plan remediation for next sprint
+- Review if exploitability is high for critical systems
+
+**Image Size Considerations:**
+- Under 500MB: Excellent
+- 500-1000MB: Good
+- 1000-1200MB: Acceptable but review for optimization
+- Over 1200MB: Consider multi-stage builds, minimal base images
+
+**Base Image Quality:**
+- Prefer: alpine, distroless, ubuntu:latest, debian:bookworm-slim
+- Review: centos, ubuntu:old-lts (outdated), custom/unverified images
+- Flag: deprecated, unsupported, or unknown base images
+
+**Dockerfile Quality Concerns:**
+- Running as root → Security risk
+- Missing healthchecks → Operational risk
+- Large image sizes → Review for unnecessary dependencies
+
+## Image Report
 
 - Image name     : {report.image_name}
 - Image size     : {report.image_size_mb:.1f} MB
-- Critical vulns : {vulns.critical}
-- High vulns     : {vulns.high}
-- Medium vulns   : {vulns.medium}
+- Critical vulns : {vulns.critical} {"❌ REJECT" if vulns.critical > 0 else "✅ PASS"}
+- High vulns     : {vulns.high} {"❌ REJECT" if vulns.high > 10 else "⚠️ WARNING" if vulns.high > 0 else "✅ PASS"}
+- Medium vulns   : {vulns.medium} {"⚠️ WARNING" if vulns.medium > 30 else "✅ PASS"}
 - Low vulns      : {vulns.low}
 - Unknown vulns  : {vulns.unknown}
 {extra}
 
-## Instructions
+## Decision Rules (Summary)
 
-Based on the information above, respond ONLY with a valid JSON object (no markdown, no code fences) with exactly these three keys:
+1. If Critical > 0 → **REJECTED** (no exceptions)
+2. If High > 10 → **REJECTED** (too many high-severity issues)
+3. If High 1-10 → **WARNING** (acceptable but monitor)
+4. If Medium > 30 → **WARNING** (schedule remediation)
+5. If Image Size > 1200MB → **WARNING** (optimization recommended)
+6. Otherwise → **APPROVED**
 
-  "decision"        — one of: APPROVED, WARNING, REJECTED
-  "reason"          — a single sentence explaining the decision
-  "recommendations" — a JSON array of short, actionable strings (max 5 items)
+## Response Format
 
-Example format:
-{{"decision": "WARNING", "reason": "...", "recommendations": ["...", "..."]}}
+Respond ONLY with valid JSON (no markdown code fences, no extra text):
+
+{{"decision": "APPROVED|WARNING|REJECTED", "reason": "Single sentence explaining decision", "recommendations": ["action1", "action2", "action3"]}}
+
+## Examples
+
+REJECTED case: {{"decision": "REJECTED", "reason": "Contains 3 critical vulnerabilities in base libraries; deployment blocked.", "recommendations": ["Update base image to latest security patch", "Run vulnerability scanner and review fixed versions", "Consider using distroless image for reduced surface area"]}}
+
+WARNING case: {{"decision": "WARNING", "reason": "5 high-severity vulnerabilities detected; acceptable to deploy but remediation required.", "recommendations": ["Schedule security patch for next sprint", "Update python and pip packages", "Review and update dependencies"]}}
+
+APPROVED case: {{"decision": "APPROVED", "reason": "Image passes security thresholds with minimal vulnerabilities and good practices.", "recommendations": ["Continue monitoring for new vulnerabilities", "Enable automatic dependency updates"]}}
 """
 
 

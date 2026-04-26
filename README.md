@@ -2,7 +2,7 @@
 
 > **Repositorio:** [github.com/DannielEU/Sentinel-AI-CD](https://github.com/DannielEU/Sentinel-AI-CD) · rama activa: `main`
 
-> Puerta de seguridad inteligente para pipelines CI/CD. Analiza imágenes de contenedor con **Trivy**, aplica un motor de reglas determinístico alineado con **OWASP** y —opcionalmente— consulta a **Mistral via Ollama** para decidir si un despliegue debe ser `APPROVED`, `WARNING` o `REJECTED`.
+> Puerta de seguridad inteligente para pipelines CI/CD. Analiza imágenes de contenedor con **Trivy**, aplica un motor de reglas determinístico alineado con **OWASP** y —opcionalmente— consulta a **Neural-Chat via Ollama** (especializado en seguridad Docker) para decidir si un despliegue debe ser `APPROVED`, `WARNING` o `REJECTED`. Compatible con **Azure Container Instances, App Service** y entornos on-premise.
 
 ---
 
@@ -47,15 +47,16 @@ git push
 | Validación de datos | [Pydantic v2](https://docs.pydantic.dev/) | 2.7 |
 | Cliente HTTP | [HTTPX](https://www.python-httpx.org/) | 0.27 |
 | Escáner de vulnerabilidades | [Trivy](https://trivy.dev/) (Aqua Security) | 0.50 |
-| Modelo de lenguaje local | [Mistral 7B](https://mistral.ai/) via [Ollama](https://ollama.com/) | 0.1.x |
+| Modelo de lenguaje local | [Neural-Chat](https://huggingface.co/Intel/neural-chat-7b) o [Mistral 7B](https://mistral.ai/) via [Ollama](https://ollama.com/) | 0.1.x |
 | Contenedores | Docker + Docker Compose | 24.x |
 | Runtime | Python | 3.11 |
+| Nube | Azure Container Instances, App Service, on-premise | - |
 
 ### ¿Por qué estas tecnologías?
 
 - **FastAPI** — tipado estricto, documentación automática (Swagger/OpenAPI), rendimiento asíncrono nativo.
 - **Trivy** — escáner open-source líder del sector, soporta imágenes OCI, filesystems, repos y SBOMs.
-- **Ollama + Mistral** — LLM local, sin enviar datos a terceros, sin costos de API. Mistral 7B es suficiente para razonamiento de seguridad contextual.
+- **Ollama + Neural-Chat** — LLM local, sin enviar datos a terceros, sin costos de API. Neural-Chat está optimizado para análisis técnico y seguridad Docker (mejor que Mistral para este caso de uso).
 - **Pydantic v2** — validación de entrada con errores claros; evita que reportes malformados lleguen al motor.
 
 ---

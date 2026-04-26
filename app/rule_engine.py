@@ -4,17 +4,23 @@ Rule Engine — deterministic security policies applied before consulting the AI
 Rules are evaluated in order.  The first rule that fires returns a decision;
 remaining rules are skipped.  If no rule fires, None is returned and the caller
 should proceed to AI analysis.
+
+Thresholds can be configured via environment variables:
+  - MAX_IMAGE_SIZE_MB: Default 1200
+  - MAX_HIGH_VULNS: Default 10
+  - MAX_MEDIUM_VULNS: Default 30
 """
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
 from schemas import ImageReport
 
-
-MAX_IMAGE_SIZE_MB = 1200
-MAX_HIGH_VULNS = 10
-MAX_MEDIUM_VULNS = 30
+# Load thresholds from environment variables with defaults
+MAX_IMAGE_SIZE_MB = int(os.getenv("MAX_IMAGE_SIZE_MB", "1200"))
+MAX_HIGH_VULNS = int(os.getenv("MAX_HIGH_VULNS", "10"))
+MAX_MEDIUM_VULNS = int(os.getenv("MAX_MEDIUM_VULNS", "30"))
 
 
 @dataclass
