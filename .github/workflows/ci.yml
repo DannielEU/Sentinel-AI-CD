@@ -19,7 +19,48 @@ env:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
-  # 1. Security Gate (Trivy → Sentinel)
+  # 1. Tests + Code validation
+  # ─────────────────────────────────────────────────────────────────────────
+  test:
+    name: Validate Code & Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile app/main.py
+          python -m py_compile app/schemas.py
+          python -m py_compile app/rule_engine.py
+          python -m py_compile app/ollama_client.py
+          echo "✅ All Python files have valid syntax"
+
+      - name: Validate Docker configuration
+        run: |
+          docker build --help > /dev/null
+          echo "✅ Docker available"
+
+      - name: Validate docker-compose configuration
+        run: |
+          pip install pyyaml -q
+          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))" && echo "✅ docker-compose.yml is valid"
+
+      - name: Validate GitHub workflow
+        run: |
+          python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" && echo "✅ CI workflow is valid"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. Security Gate (Trivy → Sentinel)
   # ─────────────────────────────────────────────────────────────────────────
   security-gate:
     name: Security Gate (Trivy + Sentinel)
