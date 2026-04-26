@@ -265,16 +265,7 @@ jobs:
             # Test 1: Direct Ollama API call
             echo ""
             echo "  [1/2] Testing direct Ollama API (model: $OLLAMA_MODEL)..."
-            OLLAMA_TEST=$(cat <<'OLLAMA_TEST_EOF'
-{
-  "model": "MODEL_PLACEHOLDER",
-  "prompt": "What is the capital of France? Answer in one word.",
-  "stream": false,
-  "temperature": 0.1
-}
-OLLAMA_TEST_EOF
-            )
-            OLLAMA_TEST="${OLLAMA_TEST//MODEL_PLACEHOLDER/$OLLAMA_MODEL}"
+            OLLAMA_TEST=$(printf '{"model":"%s","prompt":"What is the capital of France? Answer in one word.","stream":false,"temperature":0.1}' "$OLLAMA_MODEL")
 
             if curl -sf -X POST "http://localhost:${OLLAMA_PORT}/api/generate" \
               -H "Content-Type: application/json" \
@@ -296,16 +287,7 @@ OLLAMA_TEST_EOF
             # Test 2: Gate with payload that bypasses rule engine (forces Ollama)
             echo ""
             echo "  [2/2] Testing Gate with Ollama-forced payload..."
-            TEST_PAYLOAD=$(cat <<'TEST_PAYLOAD_EOF'
-{
-  "image_name": "test:latest",
-  "image_size_mb": 100,
-  "vulnerabilities": {"critical": 0, "high": 0, "medium": 15, "low": 20, "unknown": 0},
-  "base_image": "alpine:3.18",
-  "os_family": "alpine"
-}
-TEST_PAYLOAD_EOF
-            )
+            TEST_PAYLOAD='{"image_name":"test:latest","image_size_mb":100,"vulnerabilities":{"critical":0,"high":0,"medium":15,"low":20,"unknown":0},"base_image":"alpine:3.18","os_family":"alpine"}'
 
             echo "  Payload: $TEST_PAYLOAD" >> /tmp/gate_debug.log
 

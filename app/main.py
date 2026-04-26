@@ -366,6 +366,15 @@ async def analyze_image(
                 f"(`ollama pull {ollama_client.OLLAMA_MODEL}`)."
             ),
         )
+    except httpx.TimeoutException as exc:
+        logger.error("Ollama timed out after %ss: %s", ollama_client.REQUEST_TIMEOUT, exc)
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"Ollama timed out generating a response (model={ollama_client.OLLAMA_MODEL}). "
+                "First inference on CPU runners can be slow; retry or use a smaller model."
+            ),
+        )
     except httpx.HTTPStatusError as exc:
         logger.error("Ollama returned HTTP %s", exc.response.status_code)
         raise HTTPException(
