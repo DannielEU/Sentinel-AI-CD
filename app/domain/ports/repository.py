@@ -1,0 +1,23 @@
+from typing import Protocol, runtime_checkable
+
+from domain.entities import CVEException, ScanRecord
+
+
+@runtime_checkable
+class RepositoryPort(Protocol):
+    @property
+    def is_available(self) -> bool: ...
+
+    async def save_scan(self, record: ScanRecord) -> None: ...
+
+    async def get_history(
+        self, image_name: str, limit: int = 20
+    ) -> list[ScanRecord]: ...
+
+    async def get_all_recent(self, limit: int = 50) -> list[ScanRecord]: ...
+
+    async def get_active_exceptions(self) -> list[CVEException]: ...
+
+    async def add_exception(self, exc: CVEException) -> None: ...
+
+    async def delete_exception(self, cve_id: str) -> None: ...

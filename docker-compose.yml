@@ -1,20 +1,19 @@
-# Docker Compose para Sentinel AI-CD
-# Compatible con: Local, Docker Compose, Azure Container Instances, Azure App Service
-# Variables configurables:
-#   - OLLAMA_PORT: Puerto para Ollama (default: 11434)
-#   - GATE_PORT: Puerto para FastAPI gate (default: 8000)
-#   - OLLAMA_MODEL: Modelo a usar (default: neural-chat)
-#   - AI_DISABLED: Deshabilitar IA (default: false)
-#   - GATE_AUTH_TOKEN: Token de autenticación (default: none)
-#   - MAX_IMAGE_SIZE_MB: Tamaño máximo de imagen (default: 1200)
-#   - MAX_HIGH_VULNS: Vulnerabilidades HIGH máximas (default: 10)
-#   - MAX_MEDIUM_VULNS: Vulnerabilidades MEDIUM máximas (default: 30)
+# Sentinel-AI-CD — Docker Compose
+# Compatible: Local, Docker Compose, Azure Container Instances, Azure App Service, K8s
+#
+# Key variables:
+#   AI_PROVIDER      : ollama (default) | openai | anthropic | disabled
+#   DATABASE_URL     : sqlite+aiosqlite:///./data/sentinel.db  (empty = no DB)
+#   GATE_AUTH_TOKEN  : bearer token for API auth (optional)
+#   OLLAMA_MODEL     : mistral (default)
+#   OPENAI_API_KEY   : required when AI_PROVIDER=openai
+#   ANTHROPIC_API_KEY: required when AI_PROVIDER=anthropic
 
 services:
 
-  # ── Ollama — Local LLM Server (Local + Docker) ───────────────────────────────
-  # Para Azure Container Instances: descomentar si se desea usar Ollama remoto
-  # o dejar deshabilitado y usar API externa
+  # ── Ollama — Local LLM Server ─────────────────────────────────────────────
+  # Only needed when AI_PROVIDER=ollama (default).
+  # Skip or disable when using openai / anthropic providers.
   ollama:
     image: ollama/ollama:latest
     container_name: devsecops-ollama
@@ -22,14 +21,11 @@ services:
     ports:
       - "${OLLAMA_PORT:-11435}:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      - ${OLLAMA_DATA_PATH:-./ollama-data}:/root/.ollama
     environment:
       - OLLAMA_KEEP_ALIVE=5m
-    # Nota: Límites de recursos configurables vía variables en Azure
-    # En docker-compose local, usar: docker run --cpus=2 --memory=4g
 
-  # ── AI Deployment Gate — FastAPI Service ───────────────────────────────────
-  # Compatible con: Local, Docker, Azure Container Instances, Azure App Service
+  # ── Sentinel Gate — FastAPI Service ───────────────────────────────────────
   gate:
     build:
       context: .
@@ -38,36 +34,53 @@ services:
     restart: unless-stopped
     ports:
       - "${GATE_PORT:-8000}:8000"
+    volumes:
+      - sentinel-data:/app/data      # Persistent SQLite storage
     environment:
-      # Para Ollama local (mapeo interno es 11434, externo es 11435)
+      # ── AI Provider ──────────────────────────────────────────────────────
+      # Options: ollama | openai | anthropic | disabled
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+
+      # Ollama (used when AI_PROVIDER=ollama)
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
-      # Para usar modelo distinto (neural-chat es mejor para seguridad + Docker)
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-neural-chat}
-      # Deshabilitar IA por defecto (activar cuando Ollama esté ready)
-      - AI_DISABLED=${AI_DISABLED:-true}
-      # Token de autenticación (opcional)
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
+
+      # OpenAI (used when AI_PROVIDER=openai)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+
+      # Anthropic (used when AI_PROVIDER=anthropic)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+
+      # ── Database ─────────────────────────────────────────────────────────
+      # Leave empty to run without persistence (no history, no whitelist).
+      # SQLite:     sqlite+aiosqlite:///./data/sentinel.db
+      # PostgreSQL: postgresql+asyncpg://user:pass@host:5432/dbname
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/sentinel.db}
+
+      # ── Auth & Security ───────────────────────────────────────────────────
       - GATE_AUTH_TOKEN=${GATE_AUTH_TOKEN:-}
-      # Rule engine thresholds
-      - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-1200}
-      - MAX_HIGH_VULNS=${MAX_HIGH_VULNS:-10}
-      - MAX_MEDIUM_VULNS=${MAX_MEDIUM_VULNS:-30}
-      # Rate limiting (DDoS protection)
       - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
       - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
       - AUTH_FAILURE_LIMIT=${AUTH_FAILURE_LIMIT:-5}
       - AUTH_FAILURE_WINDOW=${AUTH_FAILURE_WINDOW:-300}
+
+      # ── Rule Engine Thresholds ────────────────────────────────────────────
+      - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-1200}
+      - MAX_HIGH_VULNS=${MAX_HIGH_VULNS:-10}
+      - MAX_MEDIUM_VULNS=${MAX_MEDIUM_VULNS:-30}
+
     depends_on:
       - ollama
     healthcheck:
       test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+             "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:8000/health', timeout=4); sys.exit(0 if r.status == 200 else 1)"]
       interval: 20s
       timeout: 5s
       retries: 3
       start_period: 15s
-    # Nota: Límites de recursos para Azure configurables vía variables
-    # En docker-compose local, usar: docker run --cpus=1 --memory=1g
 
 volumes:
-  ollama_data:
+  sentinel-data:
     driver: local

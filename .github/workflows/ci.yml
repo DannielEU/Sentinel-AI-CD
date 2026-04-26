@@ -9,13 +9,13 @@ on:
 env:
   IMAGE_NAME: ${{ github.repository }}:${{ github.sha }}
   GATE_URL: http://localhost:8000
-  # AI Model Configuration
-  OLLAMA_MODEL: neural-chat  # Models: neural-chat, mistral, llama2
-  AI_ENABLED: "true"          # Set to "false" to disable AI analysis (rule-engine only)
-  # Security Thresholds (configurable)
-  MAX_IMAGE_SIZE_MB: "1200"   # Warn if image exceeds this size
-  MAX_HIGH_VULNS: "10"        # Reject if HIGH vulns > this value
-  MAX_MEDIUM_VULNS: "30"      # Warn if MEDIUM vulns > this value
+  # AI Provider: ollama | openai | anthropic | disabled
+  OLLAMA_MODEL: mistral
+  AI_ENABLED: "true"           # true → AI_PROVIDER=ollama, false → AI_PROVIDER=disabled
+  # Security Thresholds
+  MAX_IMAGE_SIZE_MB: "1200"
+  MAX_HIGH_VULNS: "10"
+  MAX_MEDIUM_VULNS: "30"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
@@ -39,11 +39,9 @@ jobs:
 
       - name: Validate Python syntax
         run: |
-          python -m py_compile app/main.py
-          python -m py_compile app/schemas.py
-          python -m py_compile app/rule_engine.py
-          python -m py_compile app/ollama_client.py
-          echo " All Python files have valid syntax"
+          find app/ -name "*.py" -exec python -m py_compile {} \;
+          python -m py_compile pipeline/trivy_to_gate.py
+          echo "✅ All Python files have valid syntax"
 
       - name: Validate Docker configuration
         run: |
@@ -73,12 +71,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Checkout Sentinel desde su rama activa ───────────────────────────
+      # ── Checkout Sentinel desde la misma ref que disparó el workflow ─────
+      # IMPORTANT: must use the triggering SHA (not a fixed branch) so that
+      # changes pushed to develop are actually tested. Pinning ref: main caused
+      # the gate container to be built from stale code, ignoring local fixes.
       - name: Checkout Sentinel
         uses: actions/checkout@v4
         with:
           repository: DannielEU/Sentinel-AI-CD
-          ref: main
+          ref: ${{ github.sha }}
           path: Sentinel-AI-CD
 
       - name: Set lowercase image name
@@ -111,12 +112,35 @@ jobs:
             --exit-code 0 \
             ${{ steps.vars.outputs.image_name }}
 
+      # ── Restore Ollama model cache ───────────────────────────────────────────
+      - name: Restore Ollama model cache
+        id: ollama-cache
+        uses: actions/cache@v4
+        with:
+          path: Sentinel-AI-CD/ollama-data
+          key: ollama-model-${{ env.OLLAMA_MODEL }}-v1
+          restore-keys: |
+            ollama-model-${{ env.OLLAMA_MODEL }}-
+
       # ── Start Sentinel gate with docker compose ──────────────────────────────
       - name: Start Sentinel services (Ollama + Gate) via docker compose
         run: |
           cd Sentinel-AI-CD
 
           echo "🚀 Starting docker compose services..."
+          echo "🔍 DEBUG: AI_PROVIDER=$AI_PROVIDER (should be 'ollama' when AI is enabled)"
+          echo "🔍 DEBUG: OLLAMA_MODEL=$OLLAMA_MODEL (should be 'mistral')"
+          echo ""
+
+          # Export all variables so docker-compose reads them from the environment
+          export AI_PROVIDER
+          export OLLAMA_MODEL
+          export OLLAMA_URL="http://ollama:11434"
+          export OLLAMA_DATA_PATH="${GITHUB_WORKSPACE}/Sentinel-AI-CD/ollama-data"
+          export MAX_IMAGE_SIZE_MB
+          export MAX_HIGH_VULNS
+          export MAX_MEDIUM_VULNS
+
           docker compose up -d
 
           echo ""
@@ -142,18 +166,213 @@ jobs:
             exit 1
           fi
 
+          # Verify that AI_PROVIDER was correctly passed to the container
+          echo ""
+          echo "🔍 Checking environment variables in gate container..."
+          GATE_AI_PROVIDER=$(docker compose exec -T gate env | grep '^AI_PROVIDER=' | cut -d'=' -f2)
+          GATE_OLLAMA_MODEL=$(docker compose exec -T gate env | grep '^OLLAMA_MODEL=' | cut -d'=' -f2)
+          echo "  AI_PROVIDER in gate container: $GATE_AI_PROVIDER"
+          echo "  OLLAMA_MODEL in gate container: $GATE_OLLAMA_MODEL"
+
+          if [ "$GATE_AI_PROVIDER" = "disabled" ] && [ "$AI_PROVIDER" != "disabled" ]; then
+            echo ""
+            echo "❌ ERROR: AI_PROVIDER was not correctly passed to the container!"
+            echo "   Expected: $AI_PROVIDER"
+            echo "   Got: $GATE_AI_PROVIDER"
+            exit 1
+          fi
+          echo "✅ Environment variables correctly set in gate container"
+          echo ""
+
+          # ── Ollama readiness check ──────────────────────────────────────
+          OLLAMA_PORT="${OLLAMA_PORT:-11435}"
+          echo "⏳ Waiting for Ollama API at http://localhost:${OLLAMA_PORT} (max 120 seconds)..."
+          OLLAMA_READY=false
+          for i in $(seq 1 40); do
+            echo "  [$i/40] Checking http://localhost:${OLLAMA_PORT}/api/tags..."
+            if curl -sf "http://localhost:${OLLAMA_PORT}/api/tags" 2>/dev/null | grep -q "models"; then
+              echo "✅ Ollama API is responding!"
+              OLLAMA_READY=true
+              break
+            fi
+            echo "       → Not ready yet, waiting 3 seconds..."
+            sleep 3
+          done
+
+          if [ "$OLLAMA_READY" = "false" ]; then
+            echo ""
+            echo "❌ ERROR: Ollama did not become ready after 120 seconds!"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📋 DOCKER COMPOSE STATUS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            docker compose ps -a
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🐳 OLLAMA CONTAINER LOGS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            docker compose logs ollama --tail=50
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🚪 PORT DIAGNOSTICS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            netstat -tlnp 2>/dev/null | grep -E ":(8000|11435)" || echo "netstat not available, trying ss..."
+            ss -tlnp 2>/dev/null | grep -E ":(8000|11435)" || echo "No services found on ports 8000/11435"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🔗 CONNECTIVITY TEST:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Testing http://localhost:${OLLAMA_PORT}/api/tags..."
+            curl -v http://localhost:${OLLAMA_PORT}/api/tags 2>&1 | head -30 || echo "CURL FAILED"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🐳 GATE CONTAINER LOGS:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            docker compose logs gate --tail=30 || true
+            echo ""
+            exit 1
+          fi
+
+          # ── Pull model if not already present ─────────────────────────
+          MODEL="${OLLAMA_MODEL:-neural-chat}"
+          echo "Checking if model '$MODEL' is already loaded..."
+          if curl -sf "http://localhost:${OLLAMA_PORT}/api/tags" | grep -q "\"${MODEL}"; then
+            echo "✅ Model '$MODEL' already present in cache — skipping pull."
+          else
+            echo "📥 Model '$MODEL' not found — pulling now (this may take several minutes on first run)..."
+            if docker compose exec -T ollama ollama pull "${MODEL}"; then
+              echo "✅ Model pull complete."
+              echo "⏳ Waiting for model to initialize..."
+              sleep 5
+            else
+              echo "❌ ERROR: Model pull failed!"
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "📋 OLLAMA LOGS (last 50 lines):"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              docker compose logs ollama --tail=50
+              echo ""
+              exit 1
+            fi
+          fi
+
+          # ── Verify AI is actually working (if enabled) ─────────────────────
+          if [ "$AI_PROVIDER" != "disabled" ]; then
+            echo ""
+            echo "🤖 AI is ENABLED (AI_PROVIDER=$AI_PROVIDER) — verifying Ollama directly..."
+
+            # Test 1: Direct Ollama API call
+            echo ""
+            echo "  [1/2] Testing direct Ollama API (model: $OLLAMA_MODEL)..."
+            OLLAMA_TEST=$(printf '{"model":"%s","prompt":"What is the capital of France? Answer in one word.","stream":false,"temperature":0.1}' "$OLLAMA_MODEL")
+
+            if curl -sf -X POST "http://localhost:${OLLAMA_PORT}/api/generate" \
+              -H "Content-Type: application/json" \
+              -d "$OLLAMA_TEST" > /tmp/ollama_direct_test.json 2>&1; then
+              if grep -q '"response"' /tmp/ollama_direct_test.json && ! grep -q '"error"' /tmp/ollama_direct_test.json; then
+                RESPONSE=$(grep -o '"response":"[^"]*' /tmp/ollama_direct_test.json | head -1 | cut -d'"' -f4)
+                echo "  ✅ Ollama API responding: \"${RESPONSE:0:50}...\""
+              else
+                echo "  ❌ Ollama API error:"
+                cat /tmp/ollama_direct_test.json
+                exit 1
+              fi
+            else
+              echo "  ❌ Ollama direct API call failed!"
+              cat /tmp/ollama_direct_test.json
+              exit 1
+            fi
+
+            # Test 2: Gate with payload that bypasses rule engine (forces Ollama)
+            echo ""
+            echo "  [2/2] Testing Gate with Ollama-forced payload..."
+            TEST_PAYLOAD='{"image_name":"test:latest","image_size_mb":100,"vulnerabilities":{"critical":0,"high":0,"medium":15,"low":20,"unknown":0},"base_image":"alpine:3.18","os_family":"alpine"}'
+
+            echo "  Payload: $TEST_PAYLOAD" >> /tmp/gate_debug.log
+
+            CURL_EXIT=0
+            curl -s -X POST http://localhost:8000/analyze-image \
+              -H "Content-Type: application/json" \
+              -d "$TEST_PAYLOAD" > /tmp/ai_test.json 2>/tmp/curl_error.log || CURL_EXIT=$?
+
+            if [ $CURL_EXIT -eq 0 ] && [ -s /tmp/ai_test.json ]; then
+              # Extract only JSON (skip verbose curl output if any)
+              JSON_LINE=$(tail -1 /tmp/ai_test.json)
+              SOURCE=$(echo "$JSON_LINE" | grep -o '"source":"[^"]*' | cut -d'"' -f4)
+              DECISION=$(echo "$JSON_LINE" | grep -o '"decision":"[^"]*' | cut -d'"' -f4)
+
+              if [ -z "$SOURCE" ]; then
+                echo "  ❌ Could not parse JSON response!"
+                echo "Response file:"
+                cat /tmp/ai_test.json
+                if [ -s /tmp/curl_error.log ]; then
+                  echo ""
+                  echo "Curl stderr:"
+                  cat /tmp/curl_error.log
+                fi
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "🐳 GATE CONTAINER LOGS (last 80 lines):"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                docker compose logs gate --tail=80 || true
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "🐳 OLLAMA CONTAINER LOGS (last 40 lines):"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                docker compose logs ollama --tail=40 || true
+                exit 1
+              elif [ "$SOURCE" = "ai_model" ]; then
+                echo "  ✅ Gate consulted Ollama (source: ai_model) — decision: $DECISION"
+              else
+                echo "  ❌ Gate used '$SOURCE' instead of Ollama (ai_model)!"
+                echo ""
+                echo "This means the rule engine matched before consulting the LLM."
+                echo "Full response:"
+                cat /tmp/ai_test.json
+                exit 1
+              fi
+            else
+              echo "  ❌ Gate endpoint failed! (curl exit: $CURL_EXIT)"
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "Gate response:"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              cat /tmp/ai_test.json
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "Gate logs:"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              docker compose logs gate --tail=20 || true
+              echo ""
+              exit 1
+            fi
+
+            echo ""
+            echo "✅ AI system fully verified!"
+          fi
+
           echo ""
           echo "📊 Service Status:"
           docker compose ps
           echo ""
           echo "✅ All services ready!"
         env:
-          AI_DISABLED: ${{ env.AI_ENABLED == 'true' && 'false' || 'true' }}
+          # Map AI_ENABLED → AI_PROVIDER (new architecture)
+          AI_PROVIDER: ${{ env.AI_ENABLED == 'true' && 'ollama' || 'disabled' }}
           OLLAMA_URL: http://ollama:11434
           OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
+          OLLAMA_DATA_PATH: ${{ github.workspace }}/Sentinel-AI-CD/ollama-data
           MAX_IMAGE_SIZE_MB: ${{ env.MAX_IMAGE_SIZE_MB }}
           MAX_HIGH_VULNS: ${{ env.MAX_HIGH_VULNS }}
           MAX_MEDIUM_VULNS: ${{ env.MAX_MEDIUM_VULNS }}
+
+      # ── Save Ollama model cache (only when model was freshly pulled) ─────────
+      - name: Save Ollama model cache
+        if: steps.ollama-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: Sentinel-AI-CD/ollama-data
+          key: ollama-model-${{ env.OLLAMA_MODEL }}-v1
 
       # ── Verify gate is accessible ───────────────────────────────────────────
       - name: Verify gate connectivity
@@ -274,7 +493,6 @@ jobs:
 
           decision   = os.environ.get("GATE_DECISION", "UNKNOWN")
           image_name = os.environ.get("IMAGE_NAME", "-")
-          ai_enabled = os.environ.get("AI_ENABLED", "false").lower() == "true"
 
           # ── Parse Trivy JSON ──────────────────────────────────────────────
           try:
@@ -312,7 +530,8 @@ jobs:
           ts   = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
           # ── PR comment (concise) ──────────────────────────────────────────
-          ai_status = "enabled (Mistral/neural-chat)" if ai_enabled else "disabled (rule-engine only)"
+          ai_provider = os.environ.get("AI_PROVIDER", "disabled")
+          ai_status = f"enabled ({ai_provider})" if ai_provider != "disabled" else "disabled (rule-engine only)"
           pr_lines = [
               f"## {icon} Sentinel Security Gate — {decision}",
               f"_Scanned: `{image_name}` · {ts} · AI analysis: {ai_status}_",
@@ -344,23 +563,43 @@ jobs:
               if len(crit_high) > 25:
                   pr_lines.append(f"_…and {len(crit_high)-25} more — see the full artifact report._")
 
-          # ── Include AI analysis feedback if available ────────────────────────
+          # ── Include gate feedback (AI or rule engine) ────────────────────────
           try:
               with open("gate_response.json") as f:
                   gate_resp = json.load(f)
 
               reason = gate_resp.get("reason", "")
               recommendations = gate_resp.get("recommendations", [])
+              ai_summary = gate_resp.get("summary", "")
+              source = gate_resp.get("source", "rule_engine")
+              dashboard_url = gate_resp.get("dashboard_url", "")
 
-              if reason or recommendations:
-                  pr_lines += ["", "### 🤖 AI Analysis Feedback"]
+              if dashboard_url:
+                  pr_lines += ["", f"### 📊 [Security Dashboard]({dashboard_url})"]
+
+              # Header reflects the actual source: ai_model when AI made the call,
+              # otherwise rule engine (which may still have an AI-enriched summary).
+              if source == "ai_model":
+                  header = "### 🤖 AI Analysis Feedback"
+              else:
+                  header = "### 📋 Rule Engine Decision"
+
+              if reason or recommendations or ai_summary:
+                  pr_lines += ["", header]
+                  if source == "ai_model":
+                      pr_lines.append("_Decision made by the AI model after contextual analysis._")
                   if reason:
+                      pr_lines.append("")
                       pr_lines.append(f"**Analysis:** {reason}")
                   if recommendations:
                       pr_lines.append("")
                       pr_lines.append("**Recommendations:**")
                       for i, rec in enumerate(recommendations, 1):
                           pr_lines.append(f"  {i}. {rec}")
+                  if ai_summary:
+                      pr_lines.append("")
+                      pr_lines.append("**Summary:**")
+                      pr_lines.append(f"> {ai_summary}")
           except (FileNotFoundError, json.JSONDecodeError):
               pass  # Gate response not available or invalid
 
@@ -449,6 +688,7 @@ jobs:
         env:
           GATE_DECISION: ${{ steps.gate.outputs.gate_decision }}
           IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
+          AI_PROVIDER: ${{ env.AI_ENABLED == 'true' && 'ollama' || 'disabled' }}
 
       # ── Post comment on PR (always, even on REJECTED) ─────────────────────
       - name: Post security summary on PR
