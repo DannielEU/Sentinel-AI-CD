@@ -266,13 +266,13 @@ jobs:
             echo ""
             echo "  [1/2] Testing direct Ollama API (model: $OLLAMA_MODEL)..."
             OLLAMA_TEST=$(cat <<'OLLAMA_TEST_EOF'
-          {
-            "model": "MODEL_PLACEHOLDER",
-            "prompt": "What is the capital of France? Answer in one word.",
-            "stream": false,
-            "temperature": 0.1
-          }
-          OLLAMA_TEST_EOF
+{
+  "model": "MODEL_PLACEHOLDER",
+  "prompt": "What is the capital of France? Answer in one word.",
+  "stream": false,
+  "temperature": 0.1
+}
+OLLAMA_TEST_EOF
             )
             OLLAMA_TEST="${OLLAMA_TEST//MODEL_PLACEHOLDER/$OLLAMA_MODEL}"
 
@@ -297,14 +297,14 @@ jobs:
             echo ""
             echo "  [2/2] Testing Gate with Ollama-forced payload..."
             TEST_PAYLOAD=$(cat <<'TEST_PAYLOAD_EOF'
-          {
-            "image_name": "test:latest",
-            "image_size_mb": 100,
-            "vulnerabilities": {"critical": 0, "high": 0, "medium": 15, "low": 20, "unknown": 0},
-            "base_image": "alpine:3.18",
-            "os_family": "alpine"
-          }
-          TEST_PAYLOAD_EOF
+{
+  "image_name": "test:latest",
+  "image_size_mb": 100,
+  "vulnerabilities": {"critical": 0, "high": 0, "medium": 15, "low": 20, "unknown": 0},
+  "base_image": "alpine:3.18",
+  "os_family": "alpine"
+}
+TEST_PAYLOAD_EOF
             )
 
             echo "  Payload: $TEST_PAYLOAD" >> /tmp/gate_debug.log
