@@ -53,7 +53,7 @@ jobs:
       - name: Validate docker compose configuration
         run: |
           pip install pyyaml -q
-          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))" && echo "✅ docker-compose.yml is valid"
+          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml'))" && echo " docker-compose.yml is valid"
 
       - name: Validate GitHub workflow
         run: |
