@@ -225,12 +225,46 @@ jobs:
           # ── Verify AI is actually working (if enabled) ─────────────────────
           if [ "$AI_DISABLED" = "false" ]; then
             echo ""
-            echo "🤖 AI is ENABLED — verifying gate can communicate with Ollama..."
+            echo "🤖 AI is ENABLED — verifying Ollama directly..."
+
+            # Test 1: Direct Ollama API call
+            echo ""
+            echo "  [1/2] Testing direct Ollama API..."
+            OLLAMA_TEST=$(cat <<'OLLAMA_TEST_EOF'
+          {
+            "model": "neural-chat",
+            "prompt": "What is the capital of France? Answer in one word.",
+            "stream": false,
+            "temperature": 0.1
+          }
+          OLLAMA_TEST_EOF
+            )
+
+            if curl -sf -X POST "http://localhost:${OLLAMA_PORT}/api/generate" \
+              -H "Content-Type: application/json" \
+              -d "$OLLAMA_TEST" > /tmp/ollama_direct_test.json 2>&1; then
+              if grep -q '"response"' /tmp/ollama_direct_test.json && ! grep -q '"error"' /tmp/ollama_direct_test.json; then
+                RESPONSE=$(grep -o '"response":"[^"]*' /tmp/ollama_direct_test.json | head -1 | cut -d'"' -f4)
+                echo "  ✅ Ollama API responding: \"${RESPONSE:0:50}...\""
+              else
+                echo "  ❌ Ollama API error:"
+                cat /tmp/ollama_direct_test.json
+                exit 1
+              fi
+            else
+              echo "  ❌ Ollama direct API call failed!"
+              cat /tmp/ollama_direct_test.json
+              exit 1
+            fi
+
+            # Test 2: Gate with payload that bypasses rule engine (forces Ollama)
+            echo ""
+            echo "  [2/2] Testing Gate with Ollama-forced payload..."
             TEST_PAYLOAD=$(cat <<'TEST_PAYLOAD_EOF'
           {
             "image_name": "test:latest",
             "image_size_mb": 100,
-            "vulnerabilities": {"critical": 0, "high": 5, "medium": 10, "low": 20},
+            "vulnerabilities": {"critical": 0, "high": 0, "medium": 15, "low": 20},
             "base_image": "alpine:3.18",
             "os_family": "alpine"
           }
@@ -240,34 +274,28 @@ jobs:
             if curl -sf -X POST http://localhost:8000/analyze-image \
               -H "Content-Type: application/json" \
               -d "$TEST_PAYLOAD" > /tmp/ai_test.json 2>&1; then
+              SOURCE=$(grep -o '"source":"[^"]*' /tmp/ai_test.json | cut -d'"' -f4)
               DECISION=$(grep -o '"decision":"[^"]*' /tmp/ai_test.json | cut -d'"' -f4)
-              if [ -n "$DECISION" ]; then
-                echo "✅ AI communication verified — decision: $DECISION"
+
+              if [ "$SOURCE" = "ai_model" ]; then
+                echo "  ✅ Gate consulted Ollama (source: ai_model) — decision: $DECISION"
               else
-                echo "❌ AI endpoint responded but decision missing!"
+                echo "  ❌ Gate used $SOURCE instead of Ollama (ai_model)!"
+                echo ""
+                echo "This means the rule engine matched before consulting the LLM."
+                echo "Payload was: critical=0, high=0, medium=15, low=20"
+                echo "Full response:"
                 cat /tmp/ai_test.json
                 exit 1
               fi
             else
-              echo "❌ ERROR: Gate AI endpoint failed!"
-              echo ""
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              echo "🔗 GATE RESPONSE:"
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              cat /tmp/ai_test.json || echo "(no response)"
-              echo ""
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              echo "🐳 GATE LOGS:"
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              docker compose logs gate --tail=30
-              echo ""
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              echo "🐳 OLLAMA LOGS:"
-              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              docker compose logs ollama --tail=30
-              echo ""
+              echo "  ❌ Gate endpoint failed!"
+              cat /tmp/ai_test.json
               exit 1
             fi
+
+            echo ""
+            echo "✅ AI system fully verified!"
           fi
 
           echo ""
