@@ -198,6 +198,55 @@ jobs:
           esac
           # Do NOT exit 1 here — let comment + artifact steps run first
 
+      # ── Capture gate response (AI analysis) ──────────────────────────────────
+      - name: Get AI analysis from gate
+        continue-on-error: true
+        run: |
+          echo "🤖 Requesting AI analysis from gate..."
+
+          # Parse trivy report to build gate request
+          python3 << 'PYTHON_EOF'
+          import json
+
+          # Read Trivy report
+          with open('trivy_report.json') as f:
+              trivy_data = json.load(f)
+
+          # Count vulnerabilities
+          counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'unknown': 0}
+          for result in trivy_data.get('Results', []):
+              for vuln in result.get('Vulnerabilities', []):
+                  sev = vuln.get('Severity', 'unknown').lower()
+                  if sev in counts:
+                      counts[sev] += 1
+
+          # Build gate payload
+          payload = {
+              "image_name": "${{ steps.vars.outputs.image_name }}",
+              "image_size_mb": 350,
+              "vulnerabilities": counts,
+              "base_image": "python:3.12-slim",
+              "os_family": "debian"
+          }
+
+          # Save for curl
+          with open('/tmp/gate_payload.json', 'w') as f:
+              json.dump(payload, f)
+
+          print("✅ Gate payload prepared")
+          PYTHON_EOF
+
+          # Call gate and capture response
+          curl -s -X POST http://localhost:8000/analyze-image \
+            -H "Content-Type: application/json" \
+            -d @/tmp/gate_payload.json > gate_response.json
+
+          # Display response
+          echo ""
+          echo "Gate Response:"
+          cat gate_response.json | python3 -m json.tool
+          echo ""
+
       # ── Build PR comment + artifact report (always, even on REJECTED) ─────
       - name: Build security report
         id: report
@@ -278,6 +327,26 @@ jobs:
                   )
               if len(crit_high) > 25:
                   pr_lines.append(f"_…and {len(crit_high)-25} more — see the full artifact report._")
+
+          # ── Include AI analysis feedback if available ────────────────────────
+          try:
+              with open("gate_response.json") as f:
+                  gate_resp = json.load(f)
+
+              reason = gate_resp.get("reason", "")
+              recommendations = gate_resp.get("recommendations", [])
+
+              if reason or recommendations:
+                  pr_lines += ["", "### 🤖 AI Analysis Feedback"]
+                  if reason:
+                      pr_lines.append(f"**Analysis:** {reason}")
+                  if recommendations:
+                      pr_lines.append("")
+                      pr_lines.append("**Recommendations:**")
+                      for i, rec in enumerate(recommendations, 1):
+                          pr_lines.append(f"  {i}. {rec}")
+          except (FileNotFoundError, json.JSONDecodeError):
+              pass  # Gate response not available or invalid
 
           if decision == "REJECTED":
               pr_lines += [
