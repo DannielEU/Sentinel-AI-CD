@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "neural-chat")
-REQUEST_TIMEOUT = 120  # seconds — neural-chat optimized for Docker/security analysis
+REQUEST_TIMEOUT = 300  # seconds (5 min) — neural-chat needs time for inference on first run
 
 
 def _build_prompt(report: ImageReport) -> str:
@@ -202,7 +202,7 @@ async def generate_summary(report: ImageReport, decision: str, reason: str) -> s
             },
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{OLLAMA_BASE_URL}/api/generate",
                 json=payload,
