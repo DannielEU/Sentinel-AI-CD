@@ -210,6 +210,8 @@ jobs:
             echo "📥 Model '$MODEL' not found — pulling now (this may take several minutes on first run)..."
             if docker compose exec -T ollama ollama pull "${MODEL}"; then
               echo "✅ Model pull complete."
+              echo "⏳ Waiting for model to initialize..."
+              sleep 5
             else
               echo "❌ ERROR: Model pull failed!"
               echo ""
@@ -229,16 +231,17 @@ jobs:
 
             # Test 1: Direct Ollama API call
             echo ""
-            echo "  [1/2] Testing direct Ollama API..."
+            echo "  [1/2] Testing direct Ollama API (model: $OLLAMA_MODEL)..."
             OLLAMA_TEST=$(cat <<'OLLAMA_TEST_EOF'
           {
-            "model": "neural-chat",
+            "model": "MODEL_PLACEHOLDER",
             "prompt": "What is the capital of France? Answer in one word.",
             "stream": false,
             "temperature": 0.1
           }
           OLLAMA_TEST_EOF
             )
+            OLLAMA_TEST="${OLLAMA_TEST//MODEL_PLACEHOLDER/$OLLAMA_MODEL}"
 
             if curl -sf -X POST "http://localhost:${OLLAMA_PORT}/api/generate" \
               -H "Content-Type: application/json" \
