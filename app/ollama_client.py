@@ -24,6 +24,17 @@ def _build_prompt(report: ImageReport) -> str:
         extra_sections.append(f"- Base image     : {report.base_image}")
     if report.os_family:
         extra_sections.append(f"- OS family      : {report.os_family}")
+
+    # Add HIGH vulnerability details if available
+    if report.high_vulnerabilities_details:
+        high_vulns_text = "\n## Critical HIGH Vulnerabilities\n"
+        for i, vuln in enumerate(report.high_vulnerabilities_details, 1):
+            high_vulns_text += f"\n**{i}. {vuln.id} - {vuln.package}**\n"
+            high_vulns_text += f"   Title: {vuln.title}\n"
+            if vuln.description:
+                high_vulns_text += f"   {vuln.description[:200]}\n"
+        extra_sections.append(high_vulns_text)
+
     if report.dockerfile_content:
         extra_sections.append(
             f"\n### Dockerfile\n```\n{report.dockerfile_content[:3000]}\n```"
