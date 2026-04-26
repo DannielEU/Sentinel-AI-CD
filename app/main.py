@@ -285,29 +285,42 @@ async def analyze_image(
 
         # For WARNING decisions, try to get AI-enriched summary if AI is enabled
         ai_summary = rule_result.summary
+        ai_attempted = False
+        ai_succeeded = False
+
         if (
             rule_result.decision == "WARNING"
             and not AI_DISABLED
         ):
+            ai_attempted = True
             try:
                 ai_generated_summary = await ollama_client.generate_summary(
                     report, rule_result.decision, rule_result.reason
                 )
                 if ai_generated_summary:
                     ai_summary = ai_generated_summary
-                    logger.info("AI enriched summary for %s (Ollama responded successfully)", report.image_name)
+                    ai_succeeded = True
+                    logger.info(
+                        "✅ AI ENRICHED SUMMARY: Ollama responded successfully for %s",
+                        report.image_name,
+                    )
                 else:
                     logger.warning(
-                        "Ollama did not return a summary for %s — using rule engine fallback",
+                        "⚠️  OLLAMA FALLBACK: No summary from Ollama for %s — using rule engine default",
                         report.image_name,
                     )
             except Exception as exc:
                 logger.warning(
-                    "AI summary generation failed for %s (continuing with fallback): %s",
+                    "⚠️  OLLAMA FALLBACK: AI summary generation failed for %s — using rule engine default. Error: %s",
                     report.image_name,
                     exc,
                 )
                 # Service continues — using rule_result.summary as fallback
+        elif rule_result.decision == "WARNING" and AI_DISABLED:
+            logger.info(
+                "🚫 AI DISABLED: Summary for %s is from rule engine (AI is disabled)",
+                report.image_name,
+            )
 
         return GateDecision(
             decision=rule_result.decision,

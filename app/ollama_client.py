@@ -212,33 +212,37 @@ async def generate_summary(report: ImageReport, decision: str, reason: str) -> s
         ollama_data = response.json()
         text = ollama_data.get("response", "").strip()
         if text:
-            logger.debug("Ollama summary generated successfully for %s", report.image_name)
+            logger.info(
+                "✅ OLLAMA SUCCESS: Generated summary for %s (%d chars)",
+                report.image_name,
+                len(text),
+            )
             return text
         else:
             logger.warning(
-                "Ollama returned empty response for summary of %s — using fallback",
+                "⚠️  OLLAMA EMPTY: Returned empty response for summary of %s",
                 report.image_name,
             )
             return None
 
     except httpx.TimeoutException:
-        logger.warning(
-            "Ollama timeout (30s exceeded) while generating summary for %s — Ollama may be busy or unresponsive",
+        logger.error(
+            "❌ OLLAMA TIMEOUT: Exceeded 30s while generating summary for %s — Ollama may be busy, unresponsive, or not running",
             report.image_name,
         )
         return None
 
     except httpx.ConnectError:
-        logger.warning(
-            "Cannot reach Ollama at %s while generating summary for %s — service unavailable",
+        logger.error(
+            "❌ OLLAMA UNREACHABLE: Cannot reach Ollama at %s while generating summary for %s — service is down or not accessible",
             OLLAMA_BASE_URL,
             report.image_name,
         )
         return None
 
     except httpx.HTTPStatusError as exc:
-        logger.warning(
-            "Ollama HTTP error %s while generating summary for %s: %s",
+        logger.error(
+            "❌ OLLAMA HTTP ERROR: Status %s while generating summary for %s — %s",
             exc.response.status_code,
             report.image_name,
             exc.response.text[:200],
@@ -246,8 +250,8 @@ async def generate_summary(report: ImageReport, decision: str, reason: str) -> s
         return None
 
     except Exception as exc:
-        logger.warning(
-            "Unexpected error generating summary for %s: %s — using fallback",
+        logger.error(
+            "❌ OLLAMA ERROR: Unexpected error generating summary for %s: %s",
             report.image_name,
             exc,
         )
