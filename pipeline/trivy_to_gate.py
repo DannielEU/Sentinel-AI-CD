@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-trivy_to_gate.py — Trivy JSON → AI Deployment Gate adapter
-===========================================================
+trivy_to_gate.py — Trivy JSON → Sentinel-AI-CD adapter
+=======================================================
 Reads a Trivy JSON report, converts it to the ImageReport schema expected by
 the gate API, sends it, and exits with a code the CI/CD pipeline can act on.
 
@@ -20,7 +20,8 @@ Usage
       --image  myapp:1.2.3 \\
       --gate   http://localhost:8000
 
-Optional — include the Dockerfile so the AI model can reason about it:
+Optional — include the Dockerfile so the gate can detect secrets and
+let the AI model reason about it:
   python trivy_to_gate.py --report trivy_report.json --image myapp:1.2.3 \\
       --dockerfile ./Dockerfile
 """
@@ -28,6 +29,7 @@ Optional — include the Dockerfile so the AI model can reason about it:
 import argparse
 import json
 import sys
+import urllib.parse
 import urllib.request
 import urllib.error
 from collections import Counter
@@ -40,18 +42,16 @@ EXIT_WARNING  = 2
 EXIT_ERROR    = 3
 
 
-# ── Trivy JSON parser ────────────────────────────────────────────────────────
+# ── Trivy JSON parser ─────────────────────────────────────────────────────────
 
 def parse_trivy_report(path: Path) -> dict:
-    """Return a dict with keys: critical, high, medium, low, unknown,
-    os_family, scanner_output (truncated raw JSON), high_vulnerabilities_details."""
+    """Return vulnerability counts, os_family, scanner_output and HIGH details."""
     data = json.loads(path.read_text())
     counts: Counter = Counter()
     os_family: str | None = None
     high_vulns_details = []
 
     for result in data.get("Results", []):
-        # OS family is sometimes in the Type field
         rtype = result.get("Type", "")
         if rtype in ("alpine", "debian", "ubuntu", "redhat", "centos", "amazon"):
             os_family = rtype
@@ -60,19 +60,14 @@ def parse_trivy_report(path: Path) -> dict:
             sev = vuln.get("Severity", "UNKNOWN").upper()
             counts[sev] += 1
 
-            # Extract details of HIGH severity vulnerabilities for AI enrichment
             if sev == "HIGH" and len(high_vulns_details) < 10:
-                pkg_name = vuln.get("PkgName", "")
-                if not pkg_name:
-                    pkg_name = result.get("Target", "unknown")
-
-                vuln_detail = {
+                pkg_name = vuln.get("PkgName", "") or result.get("Target", "unknown")
+                high_vulns_details.append({
                     "id": vuln.get("VulnerabilityID", ""),
                     "package": pkg_name,
                     "title": vuln.get("Title", ""),
                     "description": (vuln.get("Description", "")[:300] if vuln.get("Description") else None),
-                }
-                high_vulns_details.append(vuln_detail)
+                })
 
     return {
         "critical": counts.get("CRITICAL", 0),
@@ -94,8 +89,7 @@ def get_image_size_mb(image_name: str) -> float:
             ["docker", "inspect", "--format", "{{.Size}}", image_name],
             stderr=subprocess.DEVNULL,
         )
-        size_bytes = int(out.strip())
-        return round(size_bytes / (1024 * 1024), 2)
+        return round(int(out.strip()) / (1024 * 1024), 2)
     except Exception:
         return 0.0
 
@@ -112,25 +106,27 @@ def extract_base_image(dockerfile_path: Path | None) -> str | None:
     return None
 
 
-# ── Gate API call ────────────────────────────────────────────────────────────
+# ── Gate API call ─────────────────────────────────────────────────────────────
 
-def call_gate(gate_url: str, payload: dict) -> dict:
+def call_gate(gate_url: str, payload: dict, token: str | None = None) -> dict:
     body = json.dumps(payload).encode()
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
         f"{gate_url.rstrip('/')}/analyze-image",
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
-    # Must exceed gate-side Ollama timeout (REQUEST_TIMEOUT=1800s in ollama_client.py)
-    # so the client doesn't drop the connection while the model is still inferring.
+    # Timeout exceeds gate-side AI inference timeout (1800s for Ollama on CPU)
     with urllib.request.urlopen(req, timeout=1830) as resp:
         return json.loads(resp.read())
 
 
-# ── Pretty printer ───────────────────────────────────────────────────────────
+# ── Pretty printer ────────────────────────────────────────────────────────────
 
-def print_result(result: dict) -> None:
+def print_result(result: dict, gate_url: str, image_name: str) -> None:
     decision = result.get("decision", "UNKNOWN")
     icons = {"APPROVED": "✅", "WARNING": "⚠️ ", "REJECTED": "❌"}
     icon = icons.get(decision, "❓")
@@ -146,31 +142,40 @@ def print_result(result: dict) -> None:
     if recs:
         print("\n  Action Items:")
         for i, r in enumerate(recs, 1):
-            # Better formatting for specific vulnerability recommendations
-            if "CVE" in r or "package" in r.lower() or "Update" in r:
-                print(f"    [{i}] {r}")
-            else:
-                print(f"    • {r}")
+            print(f"    [{i}] {r}")
 
     summary = result.get("summary")
     if summary:
-        print("\n  Summary:")
-        print(f"    {summary}")
+        print(f"\n  Summary:\n    {summary}")
 
+    # Dashboard URL from gate response, or construct locally
+    dashboard_url = result.get("dashboard_url")
+    if not dashboard_url:
+        encoded = urllib.parse.quote(image_name, safe="")
+        dashboard_url = f"{gate_url.rstrip('/')}/dashboard/{encoded}"
+
+    print(f"\n  Dashboard  : {dashboard_url}")
     print("=" * 70 + "\n")
 
+    # Machine-readable line for CI log parsers / PR comment scripts
+    print(f"::sentinel-dashboard::{dashboard_url}")
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Send Trivy report to the AI Deployment Gate.")
-    parser.add_argument("--report",     required=True,  help="Path to trivy JSON report")
+    parser = argparse.ArgumentParser(description="Send Trivy report to Sentinel-AI-CD gate.")
+    parser.add_argument("--report",     required=True,  help="Path to Trivy JSON report")
     parser.add_argument("--image",      required=True,  help="Full image name (e.g. myapp:1.2.3)")
     parser.add_argument("--gate",       default="http://localhost:8000", help="Gate base URL")
-    parser.add_argument("--dockerfile", default=None,   help="Path to Dockerfile (optional)")
+    parser.add_argument("--dockerfile", default=None,   help="Path to Dockerfile (optional, enables secrets scan)")
+    parser.add_argument("--token",      default=None,   help="Bearer auth token (or set GATE_TOKEN env var)")
     parser.add_argument("--size-mb",    type=float, default=None,
                         help="Image size in MB (auto-detected via docker inspect if omitted)")
     args = parser.parse_args()
+
+    import os
+    token = args.token or os.getenv("GATE_TOKEN")
 
     report_path     = Path(args.report)
     dockerfile_path = Path(args.dockerfile) if args.dockerfile else None
@@ -186,7 +191,7 @@ def main() -> int:
     if size_mb is None:
         size_mb = get_image_size_mb(args.image)
         if size_mb == 0.0:
-            print("WARNING: could not determine image size via docker inspect, defaulting to 0 MB",
+            print("WARNING: could not determine image size via docker inspect, defaulting to 1 MB",
                   file=sys.stderr)
 
     payload: dict = {
@@ -205,7 +210,6 @@ def main() -> int:
     if trivy["os_family"]:
         payload["os_family"] = trivy["os_family"]
 
-    # Include HIGH vulnerability details for specific recommendations
     if trivy.get("high_vulnerabilities_details"):
         payload["high_vulnerabilities_details"] = trivy["high_vulnerabilities_details"]
 
@@ -214,14 +218,14 @@ def main() -> int:
         payload["base_image"] = base_image
 
     if dockerfile_path and dockerfile_path.exists():
-        payload["dockerfile_content"] = dockerfile_path.read_text()[:4000]
+        payload["dockerfile_content"] = dockerfile_path.read_text()[:50000]
 
     print(f"Sending report to gate: {args.gate}")
     print(f"  Vulns → critical={trivy['critical']} high={trivy['high']} "
           f"medium={trivy['medium']} low={trivy['low']}")
 
     try:
-        result = call_gate(args.gate, payload)
+        result = call_gate(args.gate, payload, token=token)
     except urllib.error.URLError as exc:
         print(f"ERROR: could not reach gate service at {args.gate}: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -229,7 +233,7 @@ def main() -> int:
         print(f"ERROR: unexpected error calling gate: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
-    print_result(result)
+    print_result(result, gate_url=args.gate, image_name=args.image)
 
     decision = result.get("decision", "").upper()
     return {
