@@ -306,9 +306,9 @@ async def analyze_image(
 @app.get("/history/{image_name}", response_model=list[ScanRecord], tags=["history"])
 async def get_history(
     image_name: str,
+    request: Request,
     limit: int = 20,
     authorization: str | None = Header(default=None),
-    request: Request,
 ):
     """Return the scan history for a specific image (requires DB)."""
     _require_token(authorization, _client_ip(request))
@@ -325,8 +325,8 @@ async def get_history(
 
 @app.get("/exceptions", response_model=list[CVEException], tags=["whitelist"])
 async def list_exceptions(
-    authorization: str | None = Header(default=None),
     request: Request,
+    authorization: str | None = Header(default=None),
 ):
     """List all active CVE exceptions (whitelist)."""
     _require_token(authorization, _client_ip(request))
@@ -341,8 +341,8 @@ async def list_exceptions(
 @app.post("/exceptions", status_code=201, tags=["whitelist"])
 async def add_exception(
     exc: CVEException,
-    authorization: str | None = Header(default=None),
     request: Request,
+    authorization: str | None = Header(default=None),
 ):
     """Add or update a CVE exception (whitelist entry)."""
     _require_token(authorization, _client_ip(request))
@@ -359,8 +359,8 @@ async def add_exception(
 @app.delete("/exceptions/{cve_id}", status_code=204, tags=["whitelist"])
 async def delete_exception(
     cve_id: str,
-    authorization: str | None = Header(default=None),
     request: Request,
+    authorization: str | None = Header(default=None),
 ):
     """Deactivate a CVE exception."""
     _require_token(authorization, _client_ip(request))
