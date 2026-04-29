@@ -308,10 +308,10 @@ async def get_history(
     image_name: str,
     limit: int = 20,
     authorization: str | None = Header(default=None),
-    request: Request | None = None,
+    request: Request,
 ):
     """Return the scan history for a specific image (requires DB)."""
-    _require_token(authorization, _client_ip(request) if request else "unknown")
+    _require_token(authorization, _client_ip(request))
     if not _repo or not _repo.is_available:
         raise HTTPException(
             status_code=503,
@@ -326,10 +326,10 @@ async def get_history(
 @app.get("/exceptions", response_model=list[CVEException], tags=["whitelist"])
 async def list_exceptions(
     authorization: str | None = Header(default=None),
-    request: Request | None = None,
+    request: Request,
 ):
     """List all active CVE exceptions (whitelist)."""
-    _require_token(authorization, _client_ip(request) if request else "unknown")
+    _require_token(authorization, _client_ip(request))
     if not _repo or not _repo.is_available:
         raise HTTPException(
             status_code=503,
@@ -342,10 +342,10 @@ async def list_exceptions(
 async def add_exception(
     exc: CVEException,
     authorization: str | None = Header(default=None),
-    request: Request | None = None,
+    request: Request,
 ):
     """Add or update a CVE exception (whitelist entry)."""
-    _require_token(authorization, _client_ip(request) if request else "unknown")
+    _require_token(authorization, _client_ip(request))
     if not _repo or not _repo.is_available:
         raise HTTPException(
             status_code=503,
@@ -360,10 +360,10 @@ async def add_exception(
 async def delete_exception(
     cve_id: str,
     authorization: str | None = Header(default=None),
-    request: Request | None = None,
+    request: Request,
 ):
     """Deactivate a CVE exception."""
-    _require_token(authorization, _client_ip(request) if request else "unknown")
+    _require_token(authorization, _client_ip(request))
     if not _repo or not _repo.is_available:
         raise HTTPException(
             status_code=503,
