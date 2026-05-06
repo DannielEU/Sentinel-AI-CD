@@ -386,8 +386,257 @@ def get_schema():
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
+_DASHBOARD_CSS = """
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0b1e;--bg2:#13102a;--card:#1a1635;--card2:#231e42;
+  --border:#474080;--border2:#2e2955;
+  --primary:#1E00FF;--primary-l:#4d35ff;
+  --gold:#FFBD00;--yellow:#FFFB00;
+  --muted:#808066;--text:#F0EEFF;--text2:#b8b0d8;
+  --ok:#4ade80;--warn:#FFBD00;--err:#f87171;
+  --r:12px;--rs:8px;
+}
+html{scroll-behavior:smooth}
+body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
+a{color:var(--gold);text-decoration:none}
+a:hover{color:var(--yellow);text-decoration:underline}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:.85em;background:var(--card2);padding:2px 6px;border-radius:4px}
+/* Topbar */
+.topbar{background:var(--bg2);border-bottom:2px solid var(--border);padding:0 28px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;min-height:64px;position:sticky;top:0;z-index:100;box-shadow:0 2px 20px rgba(30,0,255,.18)}
+.logo-wrap{display:flex;align-items:center;gap:10px;text-decoration:none;flex-shrink:0;cursor:pointer}
+.logo-hex{width:38px;height:38px}
+.logo-text{font-size:1.35rem;font-weight:800;color:var(--text);letter-spacing:-.02em}
+.logo-text span{color:var(--gold)}
+.topbar-sub{color:var(--muted);font-size:.85rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar-actions{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap}
+/* Trend */
+.badge-improving{color:var(--ok);background:rgba(74,222,128,.1);padding:4px 10px;border-radius:20px;border:1px solid rgba(74,222,128,.3);font-size:.85rem;font-weight:600}
+.badge-worsening{color:var(--err);background:rgba(248,113,113,.1);padding:4px 10px;border-radius:20px;border:1px solid rgba(248,113,113,.3);font-size:.85rem;font-weight:600}
+.badge-stable{color:var(--muted);background:rgba(128,128,102,.1);padding:4px 10px;border-radius:20px;border:1px solid rgba(128,128,102,.3);font-size:.85rem;font-weight:600}
+/* Container */
+.container{padding:28px;max-width:1440px;margin:0 auto}
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border:none;border-radius:var(--rs);cursor:pointer;font-size:.88rem;font-weight:600;transition:all .15s;white-space:nowrap;text-decoration:none;line-height:1}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:0 2px 12px rgba(30,0,255,.35)}
+.btn-primary:hover{background:var(--primary-l);box-shadow:0 4px 20px rgba(30,0,255,.5)}
+.btn-gold{background:var(--gold);color:#13102a;font-weight:700}
+.btn-gold:hover{background:var(--yellow)}
+.btn-ghost{background:var(--card2);color:var(--text2);border:1px solid var(--border2)}
+.btn-ghost:hover{background:var(--card);border-color:var(--border);color:var(--text)}
+.btn-danger{background:rgba(248,113,113,.12);color:var(--err);border:1px solid rgba(248,113,113,.3)}
+.btn-danger:hover{background:rgba(248,113,113,.22)}
+.btn-sm{padding:5px 12px;font-size:.78rem}
+.btn-icon{padding:8px 14px}
+/* Image search */
+.img-search{display:flex;gap:10px;margin-bottom:28px;background:var(--card);padding:16px 20px;border-radius:var(--r);align-items:center;border:1px solid var(--border2);flex-wrap:wrap}
+.img-search input{flex:1;min-width:200px;padding:9px 14px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--rs);color:var(--text);font-size:.9rem;outline:none;transition:border-color .15s}
+.img-search input:focus{border-color:var(--primary)}
+.img-search-lbl{color:var(--muted);font-size:.85rem;white-space:nowrap}
+/* Stats */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:16px;margin-bottom:32px}
+.stat-card{background:var(--card);border-radius:var(--r);padding:20px;border-top:3px solid var(--ac);position:relative;overflow:hidden;transition:transform .15s,box-shadow .15s}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(135deg,var(--ac) 0%,transparent 60%);opacity:.05;pointer-events:none}
+.stat-card:hover{transform:translateY(-2px);box-shadow:0 4px 24px rgba(30,0,255,.12)}
+.stat-label{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;font-weight:600}
+.stat-value{color:var(--ac);font-size:2.2rem;font-weight:800;line-height:1.1;margin:6px 0 4px}
+.stat-pct{color:var(--text2);font-size:.8rem;font-weight:500}
+.stat-icon{position:absolute;top:16px;right:16px;font-size:1.5rem;opacity:.15}
+/* Sections */
+.section{margin-bottom:40px}
+.section-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.section-title{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.12em;font-weight:700;border-left:3px solid var(--primary);padding-left:10px}
+/* Chart carousel */
+.chart-nav{display:flex;align-items:center;gap:10px}
+.chart-page-info{color:var(--muted);font-size:.82rem;min-width:44px;text-align:center}
+.chart-panel{display:none}
+.chart-panel.active{display:block}
+.chart-box{background:var(--card);border-radius:var(--r);padding:24px;border:1px solid var(--border2)}
+.chart-title{color:var(--text2);font-size:.88rem;font-weight:600;margin-bottom:16px}
+.chart-legend{display:flex;gap:20px;margin-top:14px;font-size:.78rem;color:var(--muted);flex-wrap:wrap;align-items:center}
+.ldot{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:middle;flex-shrink:0}
+.chart-donut-wrap{display:flex;align-items:center;justify-content:center;gap:40px;flex-wrap:wrap}
+.donut-stats{display:flex;flex-direction:column;gap:14px}
+.donut-stat{display:flex;align-items:center;gap:10px}
+.donut-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+.donut-val{font-size:1.4rem;font-weight:700;line-height:1}
+.donut-lbl{font-size:.78rem;color:var(--muted)}
+/* Tables */
+.table-wrapper{overflow-x:auto;border-radius:var(--r);border:1px solid var(--border2)}
+table{width:100%;border-collapse:collapse;min-width:580px}
+thead th{background:var(--card2);color:var(--muted);padding:12px 14px;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;white-space:nowrap}
+tbody td{padding:12px 14px;border-bottom:1px solid var(--border2);font-size:.875rem;vertical-align:middle;color:var(--text)}
+tbody tr:last-child td{border-bottom:none}
+.scan-row{cursor:pointer;transition:background .12s}
+.scan-row:hover td{background:rgba(30,0,255,.06)}
+.scan-row:hover .exp-icon{color:var(--gold)}
+.detail-row td{padding:0}
+.detail-content{background:var(--bg2);padding:20px 28px;border-top:1px solid var(--border2);border-bottom:1px solid var(--border2)}
+.detail-section{margin-bottom:12px}
+.detail-section strong{color:var(--gold);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em}
+.detail-section p{color:var(--text2);font-size:.875rem;margin-top:6px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.detail-meta{display:flex;flex-wrap:wrap;gap:16px;font-size:.8rem;color:var(--text2);padding-top:10px;border-top:1px solid var(--border2)}
+.detail-meta strong{color:var(--text)}
+.exp-icon{color:var(--muted);font-size:.7rem;transition:transform .2s,color .15s}
+.exp-icon.open{transform:rotate(180deg);color:var(--gold)}
+/* Badges */
+.dec-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:700;letter-spacing:.04em}
+.badge-secret{color:var(--err);background:rgba(248,113,113,.1);padding:2px 8px;border-radius:10px;font-size:.78rem;margin-left:6px}
+.cve-code{color:var(--yellow)}
+.vuln-c{color:var(--err);font-weight:600}
+.vuln-h{color:var(--gold);font-weight:600}
+.vuln-m{color:var(--yellow)}
+.vuln-l{color:#60a5fa}
+/* Search */
+.search-input{width:100%;padding:11px 16px;background:var(--card);border:1px solid var(--border2);border-radius:var(--rs);color:var(--text);font-size:.9rem;outline:none;transition:border-color .15s;margin-bottom:14px}
+.search-input:focus{border-color:var(--primary)}
+/* Pagination */
+.pagination{display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 0;flex-wrap:wrap}
+.page-btn{background:var(--card);border:1px solid var(--border2);color:var(--text2);padding:7px 13px;border-radius:var(--rs);cursor:pointer;font-size:.83rem;transition:all .12s}
+.page-btn:hover,.page-btn.active{background:var(--primary);border-color:var(--primary);color:#fff}
+.page-info{color:var(--muted);font-size:.82rem;padding:0 4px}
+/* Whitelist form */
+.wl-form{background:var(--card);border-radius:var(--r);padding:24px;border:1px solid var(--border2);margin-bottom:24px}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:16px}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-label{color:var(--muted);font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em}
+.form-input{padding:9px 14px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--rs);color:var(--text);font-size:.88rem;outline:none;transition:border-color .15s;width:100%}
+.form-input:focus{border-color:var(--primary)}
+.form-input::placeholder{color:var(--muted)}
+.form-actions{display:flex;gap:10px;flex-wrap:wrap}
+.alert{padding:12px 16px;border-radius:var(--rs);font-size:.875rem;margin-top:12px;display:none}
+.alert-ok{background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);color:var(--ok)}
+.alert-err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:var(--err)}
+/* no-data */
+.no-data{color:var(--border);font-style:italic;padding:20px 0}
+/* footer */
+.footer{color:var(--border2);font-size:.78rem;margin-top:24px;border-top:1px solid var(--border2);padding-top:20px;display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+.footer a{color:var(--border)}
+.footer a:hover{color:var(--muted)}
+/* Responsive */
+@media(max-width:900px){.container{padding:16px}.topbar{padding:0 16px;gap:12px}.stats-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.topbar{min-height:52px}.topbar-sub{display:none}.stats-grid{gap:10px}.stat-value{font-size:1.7rem}.img-search{flex-direction:column}.img-search input{min-width:unset;width:100%}.form-grid{grid-template-columns:1fr}.chart-donut-wrap{flex-direction:column}.col-date{display:none}.detail-meta{flex-direction:column;gap:8px}}
+@media(max-width:400px){.stat-value{font-size:1.5rem}}
+"""
+
+_DASHBOARD_JS = """
+(function(){
+  var tok=new URLSearchParams(window.location.search).get('token')||'';
+  function withTok(u){return tok?u+(u.indexOf('?')===-1?'?':'&')+'token='+encodeURIComponent(tok):u;}
+  function authHdr(){return tok?{'Authorization':'Bearer '+tok,'Content-Type':'application/json'}:{'Content-Type':'application/json'};}
+
+  /* Image navigation */
+  var imgInput=document.getElementById('img-input');
+  window.goOverview=function(){window.location.href=withTok('/dashboard');};
+  function goToImage(){var v=imgInput.value.trim();if(v)window.location.href=withTok('/dashboard/'+encodeURIComponent(v));}
+  document.getElementById('btn-view').addEventListener('click',goToImage);
+  document.getElementById('btn-overview').addEventListener('click',window.goOverview);
+  imgInput.addEventListener('keydown',function(e){if(e.key==='Enter')goToImage();});
+
+  /* Chart carousel */
+  var curChart=1,totalCharts=3;
+  function showChart(n){
+    document.getElementById('chart-'+curChart).classList.remove('active');
+    curChart=((n-1+totalCharts)%totalCharts)+1;
+    document.getElementById('chart-'+curChart).classList.add('active');
+    document.getElementById('chart-page-info').textContent=curChart+' / '+totalCharts;
+  }
+  document.getElementById('chart-prev').addEventListener('click',function(){showChart(curChart-1);});
+  document.getElementById('chart-next').addEventListener('click',function(){showChart(curChart+1);});
+
+  /* Expandable rows */
+  window.toggleRow=function(id){
+    var det=document.getElementById(id);if(!det)return;
+    var isOpen=det.style.display!=='none';
+    det.style.display=isOpen?'none':'table-row';
+    var prev=det.previousElementSibling;
+    if(prev){var ico=prev.querySelector('.exp-icon');if(ico)ico.classList.toggle('open',!isOpen);}
+  };
+
+  /* Search filter */
+  var si=document.getElementById('search-input');
+  function applyFilter(){
+    var q=(si?si.value:'').toLowerCase();
+    document.querySelectorAll('#scan-table tbody .scan-row').forEach(function(row){
+      var ok=!q||row.textContent.toLowerCase().indexOf(q)!==-1;
+      row.style.display=ok?'':'none';
+      var det=row.nextElementSibling;
+      if(det&&det.classList.contains('detail-row')){det.style.display='none';var ic=row.querySelector('.exp-icon');if(ic)ic.classList.remove('open');}
+    });
+    applyPage(1);
+  }
+  if(si)si.addEventListener('input',applyFilter);
+
+  /* Pagination */
+  var PAGE=10,curPage=1;
+  function visRows(){return Array.from(document.querySelectorAll('#scan-table tbody .scan-row')).filter(function(r){return r.style.display!=='none';});}
+  function applyPage(p){
+    var rows=visRows(),tp=Math.max(1,Math.ceil(rows.length/PAGE));
+    curPage=Math.min(Math.max(1,p),tp);
+    var s=(curPage-1)*PAGE,e=s+PAGE;
+    rows.forEach(function(row,i){
+      var show=i>=s&&i<e;
+      row.style.display=show?'':'none';
+      var det=row.nextElementSibling;
+      if(det&&det.classList.contains('detail-row')&&!show){det.style.display='none';var ic=row.querySelector('.exp-icon');if(ic)ic.classList.remove('open');}
+    });
+    renderPg(tp);
+  }
+  function renderPg(tp){
+    var pg=document.getElementById('scan-pagination');if(!pg)return;
+    if(tp<=1){pg.innerHTML='';return;}
+    var h='',s=Math.max(1,curPage-2),e=Math.min(tp,curPage+2);
+    if(curPage>1)h+='<button class="page-btn" onclick="goPage('+(curPage-1)+')">&#8592;</button>';
+    if(s>1){h+='<button class="page-btn" onclick="goPage(1)">1</button>';if(s>2)h+='<span class="page-info">&#8230;</span>';}
+    for(var i=s;i<=e;i++)h+='<button class="page-btn'+(i===curPage?' active':'')+'" onclick="goPage('+i+')">'+i+'</button>';
+    if(e<tp){if(e<tp-1)h+='<span class="page-info">&#8230;</span>';h+='<button class="page-btn" onclick="goPage('+tp+')">'+tp+'</button>';}
+    if(curPage<tp)h+='<button class="page-btn" onclick="goPage('+(curPage+1)+')">&#8594;</button>';
+    pg.innerHTML=h;
+  }
+  window.goPage=function(p){applyPage(p);var sec=document.querySelectorAll('.section');if(sec[1])window.scrollTo({top:sec[1].getBoundingClientRect().top+window.scrollY-80,behavior:'smooth'});};
+  applyPage(1);
+
+  /* Add whitelist */
+  var wlBtn=document.getElementById('wl-submit');
+  var wlClr=document.getElementById('wl-clear');
+  if(wlBtn){
+    wlBtn.addEventListener('click',function(){
+      var cve=document.getElementById('wl-cve').value.trim().toUpperCase();
+      var reason=document.getElementById('wl-reason').value.trim();
+      var appr=document.getElementById('wl-approved').value.trim()||null;
+      var exp=document.getElementById('wl-expires').value||null;
+      var errEl=document.getElementById('wl-error'),okEl=document.getElementById('wl-ok');
+      errEl.style.display='none';okEl.style.display='none';
+      if(!cve||!reason){errEl.textContent='CVE ID and Reason are required.';errEl.style.display='block';return;}
+      if(!/^CVE-\\d{4}-\\d+$/i.test(cve)){errEl.textContent='CVE ID must match format CVE-YYYY-NNNNN.';errEl.style.display='block';return;}
+      fetch('/exceptions',{method:'POST',headers:authHdr(),body:JSON.stringify({cve_id:cve,reason:reason,approved_by:appr,expires_at:exp?exp+'T00:00:00Z':null,is_active:true})})
+        .then(function(r){
+          if(r.ok){okEl.style.display='block';setTimeout(function(){window.location.reload();},1200);}
+          else return r.json().then(function(d){throw new Error(d.detail||'Server error');});
+        })
+        .catch(function(e){errEl.textContent=e.message;errEl.style.display='block';});
+    });
+    wlClr.addEventListener('click',function(){
+      ['wl-cve','wl-reason','wl-approved','wl-expires'].forEach(function(id){document.getElementById(id).value='';});
+      document.getElementById('wl-error').style.display='none';
+      document.getElementById('wl-ok').style.display='none';
+    });
+  }
+
+  /* Delete exception */
+  window.deleteException=function(id){
+    if(!confirm('Revoke exception for '+id+'?'))return;
+    fetch('/exceptions/'+encodeURIComponent(id),{method:'DELETE',headers:authHdr()})
+      .then(function(r){if(r.ok||r.status===204)window.location.reload();else alert('Failed to revoke exception.');})
+      .catch(function(){alert('Network error.');});
+  };
+})();
+"""
+
+
 def _decision_color(d: str) -> str:
-    return {"APPROVED": "#22c55e", "WARNING": "#f59e0b", "REJECTED": "#ef4444"}.get(d, "#6b7280")
+    return {"APPROVED": "#4ade80", "WARNING": "#FFBD00", "REJECTED": "#f87171"}.get(d, "#808066")
 
 
 def _trend_badge(records: list[ScanRecord]) -> str:
@@ -398,69 +647,154 @@ def _trend_badge(records: list[ScanRecord]) -> str:
     latest_score = latest.critical_vulns * 100 + latest.high_vulns * 10 + latest.medium_vulns
     older_score = older.critical_vulns * 100 + older.high_vulns * 10 + older.medium_vulns
     if latest_score < older_score:
-        return '<span style="color:#22c55e">IMPROVING &#8595;</span>'
+        return '<span class="badge-improving">&#8595; IMPROVING</span>'
     if latest_score > older_score:
-        return '<span style="color:#ef4444">WORSENING &#8593;</span>'
-    return '<span style="color:#6b7280">STABLE &#8594;</span>'
+        return '<span class="badge-worsening">&#8593; WORSENING</span>'
+    return '<span class="badge-stable">&#8594; STABLE</span>'
 
 
 def _bar_chart_svg(records: list[ScanRecord]) -> str:
-    """Render an SVG bar chart of the vulnerability score per scan (last 20)."""
     chart_data = list(reversed(records[:20]))
     n = len(chart_data)
     if n == 0:
         return '<p class="no-data">No chart data available.</p>'
-
-    W, H = 760, 180
-    ML, MR, MT, MB = 50, 16, 16, 36
+    W, H = 760, 200
+    ML, MR, MT, MB = 52, 16, 20, 40
     cw, ch = W - ML - MR, H - MT - MB
-
     scores = [r.critical_vulns * 100 + r.high_vulns * 10 + r.medium_vulns for r in chart_data]
     max_score = max(scores) if any(s > 0 for s in scores) else 1
-
     bw = cw / n
-    bar_gap = max(1.0, bw * 0.25)
+    bar_gap = max(1.5, bw * 0.2)
     bw_actual = bw - bar_gap
-
     parts: list[str] = []
     for frac in (0.25, 0.5, 0.75, 1.0):
         gy = MT + ch * (1 - frac)
         label = str(int(max_score * frac))
         parts.append(
             f'<line x1="{ML}" y1="{gy:.1f}" x2="{W - MR}" y2="{gy:.1f}"'
-            f' stroke="#1e293b" stroke-width="1"/>'
-            f'<text x="{ML - 4}" y="{gy + 4:.1f}" fill="#475569" font-size="9"'
+            f' stroke="#474080" stroke-width="1" stroke-dasharray="4,3"/>'
+            f'<text x="{ML - 6}" y="{gy + 4:.1f}" fill="#808066" font-size="10"'
             f' text-anchor="end">{label}</text>'
         )
-
     for i, (r, score) in enumerate(zip(chart_data, scores)):
         x = ML + i * bw + bar_gap / 2
         bh = int(score / max_score * ch) if max_score > 0 else 0
         if bh == 0 and score > 0:
-            bh = 2
+            bh = 3
         y = MT + ch - bh
         color = _decision_color(r.decision)
         ts = r.scanned_at.strftime("%m/%d") if r.scanned_at else ""
-        tip = _esc(
-            f"{r.image_name} | {r.decision} | C:{r.critical_vulns} H:{r.high_vulns} M:{r.medium_vulns}"
-        )
+        tip = _esc(f"{r.image_name} | {r.decision} | C:{r.critical_vulns} H:{r.high_vulns} M:{r.medium_vulns}")
         parts.append(
-            f'<rect x="{x:.1f}" y="{y}" width="{bw_actual:.1f}" height="{max(bh, 2)}"'
-            f' fill="{color}" rx="2" opacity="0.85"><title>{tip}</title></rect>'
+            f'<rect x="{x:.1f}" y="{y}" width="{bw_actual:.1f}" height="{max(bh, 3)}"'
+            f' fill="{color}" rx="3" opacity="0.9"><title>{tip}</title></rect>'
         )
-        if n <= 6 or i % max(1, n // 6) == 0 or i == n - 1:
+        if n <= 8 or i % max(1, n // 8) == 0 or i == n - 1:
             parts.append(
-                f'<text x="{x + bw_actual / 2:.1f}" y="{H - 4}" fill="#475569"'
+                f'<text x="{x + bw_actual / 2:.1f}" y="{H - 6}" fill="#808066"'
                 f' font-size="9" text-anchor="middle">{_esc(ts)}</text>'
             )
-
     parts.append(
-        f'<line x1="{ML}" y1="{MT}" x2="{ML}" y2="{MT + ch}" stroke="#334155" stroke-width="1"/>'
-        f'<line x1="{ML}" y1="{MT + ch}" x2="{W - MR}" y2="{MT + ch}"'
-        f' stroke="#334155" stroke-width="1"/>'
+        f'<line x1="{ML}" y1="{MT}" x2="{ML}" y2="{MT + ch}" stroke="#474080" stroke-width="1.5"/>'
+        f'<line x1="{ML}" y1="{MT + ch}" x2="{W - MR}" y2="{MT + ch}" stroke="#474080" stroke-width="1.5"/>'
+    )
+    return f'<svg viewBox="0 0 {W} {H}" style="width:100%;display:block;overflow:visible">\n' + "\n".join(parts) + "\n</svg>"
+
+
+def _donut_chart_svg(approved: int, warning: int, rejected: int) -> str:
+    total = approved + warning + rejected
+    if total == 0:
+        return '<p class="no-data">No scan data available.</p>'
+    cx, cy, r, sw = 110, 110, 75, 30
+    circ = 3.14159265 * 2 * r
+    segs = [
+        (approved, "#4ade80", "Approved"),
+        (warning, "#FFBD00", "Warning"),
+        (rejected, "#f87171", "Rejected"),
+    ]
+    parts = [f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="#1a1635" stroke-width="{sw}"/>']
+    offset = 0.0
+    for count, color, label in segs:
+        if count == 0:
+            continue
+        dash = (count / total) * circ
+        gap = circ - dash
+        pct = int(count / total * 100)
+        parts.append(
+            f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{color}" stroke-width="{sw}" '
+            f'stroke-dasharray="{dash:.2f} {gap:.2f}" stroke-dashoffset="{-offset:.2f}" '
+            f'transform="rotate(-90 {cx} {cy})"><title>{label}: {count} ({pct}%)</title></circle>'
+        )
+        offset += dash
+    parts.append(
+        f'<text x="{cx}" y="{cy - 10}" text-anchor="middle" fill="#FFFB00" font-size="28" font-weight="800">{total}</text>'
+        f'<text x="{cx}" y="{cy + 16}" text-anchor="middle" fill="#808066" font-size="12">Total Scans</text>'
+    )
+    for i, (count, color, label) in enumerate(segs):
+        lx = 10 + i * 73
+        pct = int(count / total * 100) if total > 0 else 0
+        parts.append(
+            f'<rect x="{lx}" y="230" width="14" height="14" rx="3" fill="{color}"/>'
+            f'<text x="{lx + 18}" y="242" fill="#808066" font-size="11">{label} {pct}%</text>'
+        )
+    return (
+        f'<svg viewBox="0 0 220 260" style="width:100%;max-width:240px;display:block;margin:0 auto">\n'
+        + "\n".join(parts)
+        + "\n</svg>"
+    )
+
+
+def _vuln_breakdown_svg(records: list[ScanRecord]) -> str:
+    chart_data = list(reversed(records[:15]))
+    n = len(chart_data)
+    if n == 0:
+        return '<p class="no-data">No data available.</p>'
+    W, H = 760, 200
+    ML, MR, MT, MB = 52, 16, 20, 40
+    cw, ch = W - ML - MR, H - MT - MB
+    max_val = max(
+        (r.critical_vulns + r.high_vulns + r.medium_vulns + r.low_vulns for r in chart_data),
+        default=1,
+    ) or 1
+    bw = cw / n
+    bar_gap = max(2.0, bw * 0.2)
+    bw_actual = bw - bar_gap
+    parts: list[str] = []
+    for frac in (0.25, 0.5, 0.75, 1.0):
+        gy = MT + ch * (1 - frac)
+        parts.append(
+            f'<line x1="{ML}" y1="{gy:.1f}" x2="{W - MR}" y2="{gy:.1f}" stroke="#474080" stroke-width="1" stroke-dasharray="4,3"/>'
+            f'<text x="{ML - 6}" y="{gy + 4:.1f}" fill="#808066" font-size="10" text-anchor="end">{int(max_val * frac)}</text>'
+        )
+    for i, r in enumerate(chart_data):
+        x = ML + i * bw + bar_gap / 2
+        ts = r.scanned_at.strftime("%m/%d") if r.scanned_at else ""
+        current_y = float(MT + ch)
+        tip = _esc(f"C:{r.critical_vulns} H:{r.high_vulns} M:{r.medium_vulns} L:{r.low_vulns}")
+        for count, color in [
+            (r.low_vulns, "#60a5fa"),
+            (r.medium_vulns, "#FFFB00"),
+            (r.high_vulns, "#FFBD00"),
+            (r.critical_vulns, "#f87171"),
+        ]:
+            if count <= 0:
+                continue
+            bh = max(int(count / max_val * ch), 2)
+            current_y -= bh
+            parts.append(
+                f'<rect x="{x:.1f}" y="{current_y:.1f}" width="{bw_actual:.1f}" height="{bh}"'
+                f' fill="{color}" rx="2" opacity="0.9"><title>{tip}</title></rect>'
+            )
+        if n <= 8 or i % max(1, n // 8) == 0 or i == n - 1:
+            parts.append(
+                f'<text x="{x + bw_actual / 2:.1f}" y="{H - 6}" fill="#808066" font-size="9" text-anchor="middle">{_esc(ts)}</text>'
+            )
+    parts.append(
+        f'<line x1="{ML}" y1="{MT}" x2="{ML}" y2="{MT + ch}" stroke="#474080" stroke-width="1.5"/>'
+        f'<line x1="{ML}" y1="{MT + ch}" x2="{W - MR}" y2="{MT + ch}" stroke="#474080" stroke-width="1.5"/>'
     )
     return (
-        f'<svg viewBox="0 0 {W} {H}" style="width:100%;display:block">\n'
+        f'<svg viewBox="0 0 {W} {H}" style="width:100%;display:block;overflow:visible">\n'
         + "\n".join(parts)
         + "\n</svg>"
     )
@@ -472,218 +806,264 @@ def _render_dashboard(title: str, records: list[ScanRecord], exceptions: list[CV
     approved = sum(1 for r in records if r.decision == "APPROVED")
     warning = sum(1 for r in records if r.decision == "WARNING")
     rejected = sum(1 for r in records if r.decision == "REJECTED")
+    num_exc = len(exceptions)
 
     def _pct(count: int) -> str:
         return f"{count / total * 100:.0f}%" if total > 0 else "0%"
 
-    rows = ""
-    for r in records:
+    # Build scan rows (clickable, expandable)
+    rows_html = ""
+    for idx, r in enumerate(records):
         color = _decision_color(r.decision)
         ts = _esc(r.scanned_at.strftime("%Y-%m-%d %H:%M UTC") if r.scanned_at else "—")
-        secrets_badge = (
-            f'<span style="color:#ef4444;margin-left:6px">! {r.secrets_found} secret(s)</span>'
-            if r.secrets_found
-            else ""
+        sbadge = (
+            f'<span class="badge-secret">! {r.secrets_found} secret(s)</span>'
+            if r.secrets_found else ""
         )
-        reason_text = r.reason or ""
-        reason_short = _esc(reason_text[:80])
-        reason_full = _esc(reason_text)
-        ellipsis = "&#8230;" if len(reason_text) > 80 else ""
-        reason_cell = (
-            f'<details><summary style="list-style:none;cursor:pointer;color:#94a3b8;font-size:0.85em">'
-            f'{reason_short}{ellipsis}</summary>'
-            f'<div style="color:#e2e8f0;padding-top:4px;font-size:0.85em">{reason_full}</div></details>'
-        )
-        rows += (
-            f'<tr data-row>'
-            f'<td>{ts}</td>'
-            f'<td><span style="color:{color};font-weight:700">{_esc(r.decision)}</span></td>'
-            f'<td style="font-family:monospace;font-size:0.83em">{_esc(r.image_name)}</td>'
-            f'<td>'
-            f'<span style="color:#ef4444">{r.critical_vulns}</span>&#8202;/&#8202;'
-            f'<span style="color:#f59e0b">{r.high_vulns}</span>&#8202;/&#8202;'
-            f'<span style="color:#eab308">{r.medium_vulns}</span>'
-            f'</td>'
-            f'<td>{_esc(r.source)}{secrets_badge}</td>'
-            f'<td>{reason_cell}</td>'
-            f'</tr>\n'
+        reason_full = _esc(r.reason or "—")
+        ai_prov = _esc(r.ai_provider or "—")
+        rid = f"dr-{idx}"
+        rows_html += (
+            f'<tr class="scan-row" data-row onclick="toggleRow(\'{rid}\')">'
+            f'<td class="col-date">{ts}</td>'
+            f'<td><span class="dec-badge" style="background:{color}20;color:{color};border:1px solid {color}40">{_esc(r.decision)}</span></td>'
+            f'<td><code>{_esc(r.image_name)}</code></td>'
+            f'<td><span class="vuln-c">{r.critical_vulns}</span>&#8202;/&#8202;'
+            f'<span class="vuln-h">{r.high_vulns}</span>&#8202;/&#8202;'
+            f'<span class="vuln-m">{r.medium_vulns}</span>&#8202;/&#8202;'
+            f'<span class="vuln-l">{r.low_vulns}</span></td>'
+            f'<td>{_esc(r.source)}{sbadge}</td>'
+            f'<td><span class="exp-icon">&#9660;</span></td>'
+            f'</tr>'
+            f'<tr id="{rid}" class="detail-row" style="display:none">'
+            f'<td colspan="6" class="detail-cell">'
+            f'<div class="detail-content">'
+            f'<div class="detail-section"><strong>Analysis / Reason</strong>'
+            f'<p>{reason_full}</p></div>'
+            f'<div class="detail-meta">'
+            f'<span><strong>Source:</strong> {_esc(r.source)}</span>'
+            f'<span><strong>AI Provider:</strong> {ai_prov}</span>'
+            f'<span><strong>Image Size:</strong> {r.image_size_mb:.1f} MB</span>'
+            f'<span><strong>Secrets Found:</strong> {r.secrets_found}</span>'
+            f'</div></div></td></tr>\n'
         )
 
-    exc_rows = ""
+    # Build exception rows
+    exc_rows_html = ""
     for e in exceptions:
         exp = _esc(e.expires_at.strftime("%Y-%m-%d") if e.expires_at else "Never")
-        exc_rows += (
+        cve_safe = _esc(e.cve_id)
+        exc_rows_html += (
             f'<tr>'
-            f'<td><code>{_esc(e.cve_id)}</code></td>'
+            f'<td><code class="cve-code">{cve_safe}</code></td>'
             f'<td>{_esc(e.reason)}</td>'
             f'<td>{_esc(e.approved_by or "—")}</td>'
             f'<td>{exp}</td>'
+            f'<td><button class="btn btn-danger btn-sm" onclick="deleteException(\'{cve_safe}\')">Revoke</button></td>'
             f'</tr>\n'
         )
 
     trend = _trend_badge(records)
-    chart_svg = _bar_chart_svg(records)
+    chart_svg1 = _bar_chart_svg(records)
+    chart_svg2 = _donut_chart_svg(approved, warning, rejected)
+    chart_svg3 = _vuln_breakdown_svg(records)
     chart_count = min(total, 20)
 
-    scan_section = (
-        f'<input id="search-input" type="text"'
-        f' placeholder="Filter by image, decision, source&#8230;"'
-        f' style="width:100%;padding:10px 14px;background:#0f172a;border:1px solid #334155;'
-        f'border-radius:8px;color:#e2e8f0;font-size:0.9rem;margin-bottom:12px;outline:none">'
-        f'<table id="scan-table"><thead><tr>'
-        f'<th>Date</th><th>Decision</th><th>Image</th>'
-        f'<th>C&#8202;/&#8202;H&#8202;/&#8202;M</th><th>Source</th><th>Reason</th>'
-        f'</tr></thead><tbody>{rows}</tbody></table>'
-    ) if rows else '<p class="no-data">No scan records yet.</p>'
+    scan_section_html = (
+        '<input id="search-input" type="text" class="search-input"'
+        ' placeholder="Filter by image, decision, source&#8230;">'
+        '<div class="table-wrapper"><table id="scan-table"><thead><tr>'
+        '<th>Date</th><th>Decision</th><th>Image</th>'
+        '<th>C&#8202;/&#8202;H&#8202;/&#8202;M&#8202;/&#8202;L</th><th>Source</th><th></th>'
+        f'</tr></thead><tbody>{rows_html}</tbody></table></div>'
+        '<div class="pagination" id="scan-pagination"></div>'
+    ) if rows_html else '<p class="no-data">No scan records yet.</p>'
 
-    exc_section = (
-        f'<table><thead><tr>'
-        f'<th>CVE ID</th><th>Reason</th><th>Approved By</th><th>Expires</th>'
-        f'</tr></thead><tbody>{exc_rows}</tbody></table>'
-    ) if exc_rows else '<p class="no-data">No active exceptions.</p>'
+    exc_section_html = (
+        '<div class="table-wrapper"><table id="exc-table"><thead><tr>'
+        '<th>CVE ID</th><th>Reason</th><th>Approved By</th><th>Expires</th><th>Action</th>'
+        f'</tr></thead><tbody>{exc_rows_html}</tbody></table></div>'
+    ) if exc_rows_html else '<p class="no-data">No active exceptions.</p>'
+
+    css = _DASHBOARD_CSS
+    js = _DASHBOARD_JS
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sentinel &#8212; {safe_title}</title>
-<style>
-  *, *::before, *::after {{ box-sizing: border-box }}
-  body {{ font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; min-height: 100vh }}
-  a {{ color: #38bdf8; text-decoration: none }}
-  a:hover {{ text-decoration: underline }}
-  .topbar {{ background: #020817; border-bottom: 1px solid #1e293b; padding: 14px 32px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap }}
-  .topbar h1 {{ color: #38bdf8; margin: 0; font-size: 1.3rem; white-space: nowrap }}
-  .topbar .subtitle {{ color: #475569; font-size: 0.88rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }}
-  .topbar .trend {{ margin-left: auto; font-size: 0.95rem; white-space: nowrap }}
-  .container {{ padding: 28px 32px; max-width: 1440px; margin: 0 auto }}
-  .img-search {{ display: flex; gap: 10px; margin-bottom: 28px; background: #1e293b; padding: 16px 20px; border-radius: 12px; align-items: center }}
-  .img-search input {{ flex: 1; padding: 9px 14px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #e2e8f0; font-size: 0.9rem; outline: none }}
-  .img-search input:focus {{ border-color: #38bdf8 }}
-  .btn {{ padding: 9px 18px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.88rem; white-space: nowrap }}
-  .btn-primary {{ background: #0284c7; color: #fff }}
-  .btn-primary:hover {{ background: #0369a1 }}
-  .btn-ghost {{ background: #334155; color: #cbd5e1 }}
-  .btn-ghost:hover {{ background: #475569 }}
-  .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-bottom: 32px }}
-  .stat-card {{ background: #1e293b; border-radius: 12px; padding: 18px 20px; border-left: 4px solid var(--accent) }}
-  .stat-label {{ color: #64748b; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em }}
-  .stat-value {{ color: var(--accent); font-size: 1.9rem; font-weight: 700; margin: 5px 0 2px }}
-  .stat-pct {{ color: #475569; font-size: 0.78rem }}
-  .section {{ margin-bottom: 40px }}
-  h3 {{ color: #94a3b8; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.09em; border-bottom: 1px solid #1e293b; padding-bottom: 10px; margin: 0 0 16px }}
-  .chart-box {{ background: #1e293b; border-radius: 12px; padding: 20px 20px 14px }}
-  .chart-legend {{ display: flex; gap: 20px; margin-top: 12px; font-size: 0.78rem; color: #64748b; flex-wrap: wrap }}
-  .ldot {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: middle }}
-  table {{ width: 100%; border-collapse: collapse }}
-  th {{ background: #1e293b; color: #64748b; padding: 10px 14px; text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em }}
-  td {{ padding: 10px 14px; border-bottom: 1px solid #0f172a; font-size: 0.88rem; vertical-align: top }}
-  tbody tr:hover td {{ background: rgba(30,41,59,0.4) }}
-  .no-data {{ color: #334155; font-style: italic; padding: 16px 0 }}
-  code {{ background: #1e293b; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; font-family: monospace }}
-  details summary::-webkit-details-marker {{ display: none }}
-  details summary::marker {{ display: none }}
-</style>
+<title>HexaFlow &#8212; {safe_title}</title>
+<style>{css}</style>
 </head>
 <body>
-<div class="topbar">
-  <h1>&#128737; Sentinel-AI-CD</h1>
-  <span class="subtitle">{safe_title}</span>
-  <span class="trend">{trend}</span>
-</div>
-<div class="container">
+
+<header class="topbar">
+  <div class="logo-wrap" onclick="goOverview()">
+    <svg class="logo-hex" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <polygon points="22,2 40,12 40,32 22,42 4,32 4,12" fill="none" stroke="#474080" stroke-width="3.5" stroke-linejoin="round"/>
+      <path d="M8,32 C8,32 10,22 20,18 L28,18 C33,18 33,12 28,12 L36,8" fill="none" stroke="#FFBD00" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="33,6 38,9 34,13" fill="none" stroke="#FFBD00" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="8" y1="32" x2="12" y2="38" stroke="#FFBD00" stroke-width="3" stroke-linecap="round"/>
+      <polyline points="9,37 14,38 13,43" fill="none" stroke="#FFBD00" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span class="logo-text">Hexa<span>Flow</span></span>
+  </div>
+  <span class="topbar-sub">{safe_title}</span>
+  <div class="topbar-actions">
+    <span>{trend}</span>
+  </div>
+</header>
+
+<main class="container">
 
   <div class="img-search">
-    <input id="img-input" type="text" placeholder="Image name (e.g. nginx:latest) &#8212; press Enter to view history">
-    <button class="btn btn-primary" id="btn-view">View Image</button>
+    <span class="img-search-lbl">&#128269; Image history:</span>
+    <input id="img-input" type="text" placeholder="nginx:latest, myapp:v1.2.3 &#8212; press Enter">
+    <button class="btn btn-primary" id="btn-view">View History</button>
     <button class="btn btn-ghost" id="btn-overview">&#8592; Overview</button>
   </div>
 
   <div class="stats-grid">
-    <div class="stat-card" style="--accent:#38bdf8">
+    <div class="stat-card" style="--ac:#60a5fa">
+      <div class="stat-icon">&#128202;</div>
       <div class="stat-label">Total Scans</div>
       <div class="stat-value">{total}</div>
+      <div class="stat-pct">all time</div>
     </div>
-    <div class="stat-card" style="--accent:#22c55e">
+    <div class="stat-card" style="--ac:#4ade80">
+      <div class="stat-icon">&#9989;</div>
       <div class="stat-label">Approved</div>
       <div class="stat-value">{approved}</div>
       <div class="stat-pct">{_pct(approved)}</div>
     </div>
-    <div class="stat-card" style="--accent:#f59e0b">
+    <div class="stat-card" style="--ac:#FFBD00">
+      <div class="stat-icon">&#9888;</div>
       <div class="stat-label">Warning</div>
       <div class="stat-value">{warning}</div>
       <div class="stat-pct">{_pct(warning)}</div>
     </div>
-    <div class="stat-card" style="--accent:#ef4444">
+    <div class="stat-card" style="--ac:#f87171">
+      <div class="stat-icon">&#128683;</div>
       <div class="stat-label">Rejected</div>
       <div class="stat-value">{rejected}</div>
       <div class="stat-pct">{_pct(rejected)}</div>
     </div>
+    <div class="stat-card" style="--ac:#c084fc">
+      <div class="stat-icon">&#128737;</div>
+      <div class="stat-label">CVE Exceptions</div>
+      <div class="stat-value">{num_exc}</div>
+      <div class="stat-pct">active</div>
+    </div>
   </div>
 
   <div class="section">
-    <h3>Vulnerability Trend &#8212; last {chart_count} scans</h3>
-    <div class="chart-box">
-      {chart_svg}
-      <div class="chart-legend">
-        <span><span class="ldot" style="background:#22c55e"></span>Approved</span>
-        <span><span class="ldot" style="background:#f59e0b"></span>Warning</span>
-        <span><span class="ldot" style="background:#ef4444"></span>Rejected</span>
-        <span style="margin-left:auto">Height = C&#215;100 + H&#215;10 + M</span>
+    <div class="section-header">
+      <span class="section-title">Security Analytics</span>
+      <div class="chart-nav">
+        <button class="btn btn-ghost btn-icon" id="chart-prev">&#8592;</button>
+        <span id="chart-page-info" class="chart-page-info">1 / 3</span>
+        <button class="btn btn-ghost btn-icon" id="chart-next">&#8594;</button>
+      </div>
+    </div>
+    <div class="chart-panel active" id="chart-1">
+      <div class="chart-box">
+        <div class="chart-title">Vulnerability Score Trend &#8212; last {chart_count} scans
+          <span style="color:var(--muted);font-weight:400;font-size:.8em">&nbsp;(C&#215;100 + H&#215;10 + M)</span>
+        </div>
+        {chart_svg1}
+        <div class="chart-legend">
+          <span><span class="ldot" style="background:#4ade80"></span>Approved</span>
+          <span><span class="ldot" style="background:#FFBD00"></span>Warning</span>
+          <span><span class="ldot" style="background:#f87171"></span>Rejected</span>
+        </div>
+      </div>
+    </div>
+    <div class="chart-panel" id="chart-2">
+      <div class="chart-box">
+        <div class="chart-title">Decision Distribution</div>
+        <div class="chart-donut-wrap">
+          {chart_svg2}
+          <div class="donut-stats">
+            <div class="donut-stat">
+              <div class="donut-dot" style="background:#4ade80"></div>
+              <div><div class="donut-val" style="color:#4ade80">{approved}</div><div class="donut-lbl">Approved ({_pct(approved)})</div></div>
+            </div>
+            <div class="donut-stat">
+              <div class="donut-dot" style="background:#FFBD00"></div>
+              <div><div class="donut-val" style="color:#FFBD00">{warning}</div><div class="donut-lbl">Warning ({_pct(warning)})</div></div>
+            </div>
+            <div class="donut-stat">
+              <div class="donut-dot" style="background:#f87171"></div>
+              <div><div class="donut-val" style="color:#f87171">{rejected}</div><div class="donut-lbl">Rejected ({_pct(rejected)})</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="chart-panel" id="chart-3">
+      <div class="chart-box">
+        <div class="chart-title">Vulnerability Type Breakdown &#8212; last {min(total, 15)} scans</div>
+        {chart_svg3}
+        <div class="chart-legend">
+          <span><span class="ldot" style="background:#f87171"></span>Critical</span>
+          <span><span class="ldot" style="background:#FFBD00"></span>High</span>
+          <span><span class="ldot" style="background:#FFFB00"></span>Medium</span>
+          <span><span class="ldot" style="background:#60a5fa"></span>Low</span>
+        </div>
       </div>
     </div>
   </div>
 
   <div class="section">
-    <h3>Scan History</h3>
-    {scan_section}
+    <div class="section-header">
+      <span class="section-title">Scan History &amp; Feedback</span>
+    </div>
+    {scan_section_html}
   </div>
 
   <div class="section">
-    <h3>Active CVE Exceptions</h3>
-    {exc_section}
+    <div class="section-header">
+      <span class="section-title">CVE Whitelist / Exceptions</span>
+    </div>
+    <div class="wl-form">
+      <div style="color:var(--text2);font-size:.88rem;font-weight:600;margin-bottom:14px">Add Exception</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label" for="wl-cve">CVE ID *</label>
+          <input class="form-input" id="wl-cve" type="text" placeholder="CVE-2024-12345" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="wl-reason">Reason *</label>
+          <input class="form-input" id="wl-reason" type="text" placeholder="Not exploitable in our context">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="wl-approved">Approved By</label>
+          <input class="form-input" id="wl-approved" type="text" placeholder="security-team">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="wl-expires">Expires (optional)</label>
+          <input class="form-input" id="wl-expires" type="date">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-gold" id="wl-submit">&#43; Add to Whitelist</button>
+        <button class="btn btn-ghost" id="wl-clear">Clear</button>
+      </div>
+      <div class="alert alert-ok" id="wl-ok">&#9989; Exception added. Reloading&#8230;</div>
+      <div class="alert alert-err" id="wl-error">Error</div>
+    </div>
+    {exc_section_html}
   </div>
 
-  <p style="color:#1e293b;font-size:0.78rem;margin-top:24px;border-top:1px solid #1e293b;padding-top:16px">
-    Sentinel-AI-CD v2.0
-    &bull; <a href="/docs">API Docs</a>
-    &bull; <a href="/schema">DB Schema</a>
-  </p>
-</div>
-<script>
-(function () {{
-  var tok = new URLSearchParams(window.location.search).get('token') || '';
-  function withTok(url) {{
-    return tok ? url + (url.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(tok) : url;
-  }}
+  <div class="footer">
+    <span>HexaFlow Security Gate v2.0</span>
+    <a href="/docs">API Docs</a>
+    <a href="/schema">DB Schema</a>
+  </div>
 
-  var imgInput = document.getElementById('img-input');
-  var filterInput = document.getElementById('search-input');
-
-  function goToImage() {{
-    var v = imgInput.value.trim();
-    if (v) window.location.href = withTok('/dashboard/' + encodeURIComponent(v));
-  }}
-
-  document.getElementById('btn-view').addEventListener('click', goToImage);
-  document.getElementById('btn-overview').addEventListener('click', function () {{
-    window.location.href = withTok('/dashboard');
-  }});
-  imgInput.addEventListener('keydown', function (e) {{
-    if (e.key === 'Enter') goToImage();
-  }});
-
-  if (filterInput) {{
-    filterInput.addEventListener('input', function () {{
-      var q = this.value.toLowerCase();
-      document.querySelectorAll('#scan-table tbody tr[data-row]').forEach(function (row) {{
-        row.style.display = row.textContent.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
-      }});
-    }});
-  }}
-}})();
-</script>
+</main>
+<script>{js}</script>
 </body>
 </html>"""
 
