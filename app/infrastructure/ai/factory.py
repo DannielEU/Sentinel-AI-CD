@@ -34,9 +34,25 @@ def create_ai_provider():
                 "AI_PROVIDER=openai requires OPENAI_API_KEY to be set"
             )
         model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        logger.info("AI provider: openai (model=%s)", model)
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip() or None
+        azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "").strip() or None
+        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+        if azure_endpoint:
+            logger.info(
+                "AI provider: azure_openai (endpoint=%s, deployment=%s)",
+                azure_endpoint,
+                azure_deployment or model,
+            )
+        else:
+            logger.info("AI provider: openai (model=%s)", model)
         from infrastructure.ai.openai_provider import OpenAIProvider
-        return OpenAIProvider(api_key=api_key, model=model)
+        return OpenAIProvider(
+            api_key=api_key,
+            model=model,
+            azure_endpoint=azure_endpoint,
+            azure_deployment=azure_deployment,
+            azure_api_version=azure_api_version,
+        )
 
     if provider == "anthropic":
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()

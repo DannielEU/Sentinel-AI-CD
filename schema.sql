@@ -1,15 +1,5 @@
--- Sentinel-AI-CD Database Schema
--- Compatible with SQLite and PostgreSQL
---
--- SQLite:    sqlite3 data/sentinel.db < schema.sql
--- PostgreSQL: psql $DATABASE_URL < schema.sql
---
--- Set DATABASE_URL to enable persistence:
---   SQLite:     DATABASE_URL=sqlite+aiosqlite:///./data/sentinel.db
---   PostgreSQL: DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
-
 CREATE TABLE IF NOT EXISTS scan_history (
-    id             INTEGER   PRIMARY KEY AUTOINCREMENT,
+    id             INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     image_name     TEXT      NOT NULL,
     decision       TEXT      NOT NULL CHECK(decision IN ('APPROVED', 'WARNING', 'REJECTED')),
     reason         TEXT      NOT NULL,
@@ -25,7 +15,7 @@ CREATE TABLE IF NOT EXISTS scan_history (
 );
 
 CREATE TABLE IF NOT EXISTS cve_exceptions (
-    id          INTEGER   PRIMARY KEY AUTOINCREMENT,
+    id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     cve_id      TEXT      NOT NULL UNIQUE,
     reason      TEXT      NOT NULL,
     approved_by TEXT,
