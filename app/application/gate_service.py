@@ -213,7 +213,7 @@ class GateService:
         # Never emit a localhost/loopback dashboard URL — it won't be reachable
         # after the CI container is torn down
         if not base or any(
-            h in base for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+            h in base for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")  # nosec B104
         ):
             return decision
 

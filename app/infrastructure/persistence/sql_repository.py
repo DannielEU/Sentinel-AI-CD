@@ -10,12 +10,11 @@ Schema is also documented in schema.sql at the repository root.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from domain.entities import CVEException, ScanRecord
 
@@ -146,7 +145,7 @@ class SQLRepository:
     async def create(cls, database_url: str) -> "SQLRepository":
         is_pg = database_url.startswith("postgresql")
         engine = create_async_engine(database_url, echo=False, future=True)
-        session_factory = sessionmaker(
+        session_factory = async_sessionmaker(
             engine, class_=AsyncSession, expire_on_commit=False
         )
         ddl = _DDL_PG if is_pg else _DDL

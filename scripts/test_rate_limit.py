@@ -101,7 +101,7 @@ def test_rate_limit(base_url: str, token: Optional[str] = None, num_requests: in
         time.sleep(0.1)
 
     print(f"\n{'─'*80}")
-    print(f"Results:")
+    print("Results:")
     print(f"  ✅ Successful: {results['success']}")
     print(f"  ⚠️  Rate Limited: {results['rate_limited']}")
     print(f"  ❌ Errors: {results['errors']}")
@@ -156,7 +156,7 @@ def test_health(base_url: str):
     try:
         response = httpx.get(f"{base_url}/health", timeout=10)
         if response.status_code == 200:
-            print_success(f"Health check passed")
+            print_success("Health check passed")
             data = response.json()
             print_info(f"Response: {json.dumps(data, indent=2)}")
         else:
@@ -200,7 +200,7 @@ def test_valid_request(base_url: str, token: Optional[str] = None):
         response = httpx.post(url, json=payload, headers=headers, timeout=10)
 
         if response.status_code == 200:
-            print_success(f"Request successful (200)")
+            print_success("Request successful (200)")
             data = response.json()
             print_info(f"Decision: {data.get('decision')}")
             print_info(f"Reason: {data.get('reason')}")

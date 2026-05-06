@@ -56,7 +56,7 @@ def main():
     args = parser.parse_args()
 
     print(f"\n{'='*80}")
-    print(f"🔐 Sentinel AI-CD Token Generator")
+    print("🔐 Sentinel AI-CD Token Generator")
     print(f"{'='*80}\n")
 
     tokens = []

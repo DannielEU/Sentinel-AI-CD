@@ -280,7 +280,7 @@ async def analyze_image(
     gate_base_url = str(request.base_url).rstrip("/")
 
     try:
-        return await _gate_service.analyze(report, gate_base_url=gate_base_url)
+        return await _gate_service.analyze(report, gate_base_url=gate_base_url)  # type: ignore[union-attr]
     except httpx.ConnectError as exc:
         raise HTTPException(
             status_code=503,
@@ -306,13 +306,13 @@ async def analyze_image(
 @app.get("/history/{image_name}", response_model=list[ScanRecord], tags=["history"])
 async def get_history(
     image_name: str,
+    request: Request,
     limit: int = 20,
     authorization: str | None = Header(default=None),
-    request: Request = None,
 ):
     """Return the scan history for a specific image (requires DB)."""
-    _require_token(authorization, _client_ip(request) if request else "unknown")
-    if not _repo.is_available:
+    _require_token(authorization, _client_ip(request))
+    if not _repo or not _repo.is_available:
         raise HTTPException(
             status_code=503,
             detail="Database not configured. Set DATABASE_URL to enable history.",
@@ -325,12 +325,12 @@ async def get_history(
 
 @app.get("/exceptions", response_model=list[CVEException], tags=["whitelist"])
 async def list_exceptions(
+    request: Request,
     authorization: str | None = Header(default=None),
-    request: Request = None,
 ):
     """List all active CVE exceptions (whitelist)."""
-    _require_token(authorization, _client_ip(request) if request else "unknown")
-    if not _repo.is_available:
+    _require_token(authorization, _client_ip(request))
+    if not _repo or not _repo.is_available:
         raise HTTPException(
             status_code=503,
             detail="Database not configured. Set DATABASE_URL to enable whitelist.",
@@ -341,12 +341,12 @@ async def list_exceptions(
 @app.post("/exceptions", status_code=201, tags=["whitelist"])
 async def add_exception(
     exc: CVEException,
+    request: Request,
     authorization: str | None = Header(default=None),
-    request: Request = None,
 ):
     """Add or update a CVE exception (whitelist entry)."""
-    _require_token(authorization, _client_ip(request) if request else "unknown")
-    if not _repo.is_available:
+    _require_token(authorization, _client_ip(request))
+    if not _repo or not _repo.is_available:
         raise HTTPException(
             status_code=503,
             detail="Database not configured. Set DATABASE_URL to enable whitelist.",
@@ -359,12 +359,12 @@ async def add_exception(
 @app.delete("/exceptions/{cve_id}", status_code=204, tags=["whitelist"])
 async def delete_exception(
     cve_id: str,
+    request: Request,
     authorization: str | None = Header(default=None),
-    request: Request = None,
 ):
     """Deactivate a CVE exception."""
-    _require_token(authorization, _client_ip(request) if request else "unknown")
-    if not _repo.is_available:
+    _require_token(authorization, _client_ip(request))
+    if not _repo or not _repo.is_available:
         raise HTTPException(
             status_code=503,
             detail="Database not configured.",
@@ -692,7 +692,7 @@ def _render_dashboard(title: str, records: list[ScanRecord], exceptions: list[CV
 async def dashboard_overview(request: Request):
     """Overall security dashboard — recent scans across all images."""
     _require_dashboard_token(request)
-    if not _repo.is_available:
+    if not _repo or not _repo.is_available:
         return HTMLResponse(
             content="<h1>Dashboard unavailable</h1><p>Set DATABASE_URL to enable the dashboard.</p>",
             status_code=503,
@@ -706,7 +706,7 @@ async def dashboard_overview(request: Request):
 async def dashboard_image(image_name: str, request: Request):
     """Security dashboard for a specific image — history and trend."""
     _require_dashboard_token(request)
-    if not _repo.is_available:
+    if not _repo or not _repo.is_available:
         return HTMLResponse(
             content="<h1>Dashboard unavailable</h1><p>Set DATABASE_URL to enable the dashboard.</p>",
             status_code=503,

@@ -49,7 +49,7 @@ def parse_trivy_report(path: Path) -> dict:
     data = json.loads(path.read_text())
     counts: Counter = Counter()
     os_family: str | None = None
-    high_vulns_details = []
+    high_vulns_details: list[dict[str, str | None]] = []
 
     for result in data.get("Results", []):
         rtype = result.get("Type", "")
@@ -84,8 +84,8 @@ def parse_trivy_report(path: Path) -> dict:
 def get_image_size_mb(image_name: str) -> float:
     """Try to get image size via docker inspect; fall back to 0 on error."""
     try:
-        import subprocess
-        out = subprocess.check_output(
+        import subprocess  # nosec B404
+        out = subprocess.check_output(  # nosec B603 B607
             ["docker", "inspect", "--format", "{{.Size}}", image_name],
             stderr=subprocess.DEVNULL,
         )
@@ -120,7 +120,7 @@ def call_gate(gate_url: str, payload: dict, token: str | None = None) -> dict:
         method="POST",
     )
     # Timeout exceeds gate-side AI inference timeout (1800s for Ollama on CPU)
-    with urllib.request.urlopen(req, timeout=1830) as resp:
+    with urllib.request.urlopen(req, timeout=1830) as resp:  # nosec B310
         return json.loads(resp.read())
 
 
