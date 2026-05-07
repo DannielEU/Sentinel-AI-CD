@@ -19,6 +19,21 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = 300.0
 
 
+def _snippet_exists(vuln: CodeVulnerability, content: str) -> bool:
+    """Return False if the model hallucinated a code_snippet that doesn't exist in the file."""
+    snippet = (vuln.code_snippet or "").strip()
+    if not snippet:
+        return True  # no snippet to validate — keep the finding
+    # Normalise whitespace for comparison
+    normalised_content = " ".join(content.split())
+    normalised_snippet = " ".join(snippet.split())
+    if normalised_snippet in normalised_content:
+        return True
+    # Allow a partial match: at least one full token of 8+ chars must appear
+    tokens = [t for t in normalised_snippet.split() if len(t) >= 8]
+    return any(t in normalised_content for t in tokens)
+
+
 class AICodeAnalyzer:
     def __init__(self, provider: str, **config) -> None:
         self._provider = provider
@@ -34,7 +49,7 @@ class AICodeAnalyzer:
         try:
             raw = await self._call(prompt)
             vulns = parse_code_analysis_response(raw, file.filename)
-            return vulns
+            return [v for v in vulns if _snippet_exists(v, file.content)]
         except Exception as exc:
             logger.warning("Code analysis failed for %s: %s", file.filename, exc)
             return []

@@ -68,3 +68,4 @@ class CodeScanRecord(BaseModel):
     files_analyzed: int = 0
     ai_provider: Optional[str] = None
     scanned_at: Optional[datetime] = None
+    vulnerabilities: list[CodeVulnerability] = Field(default_factory=list)

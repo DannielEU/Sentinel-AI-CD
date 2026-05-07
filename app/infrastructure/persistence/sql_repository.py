@@ -53,18 +53,19 @@ CREATE INDEX IF NOT EXISTS idx_scan_history_scanned_at ON scan_history(scanned_a
 CREATE INDEX IF NOT EXISTS idx_cve_exceptions_cve_id   ON cve_exceptions(cve_id);
 
 CREATE TABLE IF NOT EXISTS code_scan_history (
-    id             INTEGER   PRIMARY KEY AUTOINCREMENT,
-    project_name   TEXT      NOT NULL,
-    commit_sha     TEXT,
-    branch         TEXT,
-    decision       TEXT      NOT NULL,
-    critical_count INTEGER   DEFAULT 0,
-    high_count     INTEGER   DEFAULT 0,
-    medium_count   INTEGER   DEFAULT 0,
-    low_count      INTEGER   DEFAULT 0,
-    files_analyzed INTEGER   DEFAULT 0,
-    ai_provider    TEXT,
-    scanned_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id                  INTEGER   PRIMARY KEY AUTOINCREMENT,
+    project_name        TEXT      NOT NULL,
+    commit_sha          TEXT,
+    branch              TEXT,
+    decision            TEXT      NOT NULL,
+    critical_count      INTEGER   DEFAULT 0,
+    high_count          INTEGER   DEFAULT 0,
+    medium_count        INTEGER   DEFAULT 0,
+    low_count           INTEGER   DEFAULT 0,
+    files_analyzed      INTEGER   DEFAULT 0,
+    ai_provider         TEXT,
+    vulnerabilities_json TEXT,
+    scanned_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_code_scan_project    ON code_scan_history(project_name);
@@ -104,18 +105,19 @@ CREATE INDEX IF NOT EXISTS idx_scan_history_scanned_at ON scan_history(scanned_a
 CREATE INDEX IF NOT EXISTS idx_cve_exceptions_cve_id   ON cve_exceptions(cve_id);
 
 CREATE TABLE IF NOT EXISTS code_scan_history (
-    id             SERIAL    PRIMARY KEY,
-    project_name   TEXT      NOT NULL,
-    commit_sha     TEXT,
-    branch         TEXT,
-    decision       TEXT      NOT NULL,
-    critical_count INTEGER   DEFAULT 0,
-    high_count     INTEGER   DEFAULT 0,
-    medium_count   INTEGER   DEFAULT 0,
-    low_count      INTEGER   DEFAULT 0,
-    files_analyzed INTEGER   DEFAULT 0,
-    ai_provider    TEXT,
-    scanned_at     TIMESTAMPTZ DEFAULT NOW()
+    id                  SERIAL    PRIMARY KEY,
+    project_name        TEXT      NOT NULL,
+    commit_sha          TEXT,
+    branch              TEXT,
+    decision            TEXT      NOT NULL,
+    critical_count      INTEGER   DEFAULT 0,
+    high_count          INTEGER   DEFAULT 0,
+    medium_count        INTEGER   DEFAULT 0,
+    low_count           INTEGER   DEFAULT 0,
+    files_analyzed      INTEGER   DEFAULT 0,
+    ai_provider         TEXT,
+    vulnerabilities_json TEXT,
+    scanned_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_code_scan_project    ON code_scan_history(project_name);
@@ -170,12 +172,28 @@ def _row_to_exc(row: Any) -> CVEException:
 
 
 def _row_to_code_scan(row: Any) -> CodeScanRecord:
+    import json as _json
+    from domain.code_entities import CodeVulnerability
+
     scanned_at = row.scanned_at
     if isinstance(scanned_at, str):
         try:
             scanned_at = datetime.fromisoformat(scanned_at)
         except ValueError:
             scanned_at = None
+
+    vulns: list[CodeVulnerability] = []
+    raw_json = getattr(row, "vulnerabilities_json", None)
+    if raw_json:
+        try:
+            for item in _json.loads(raw_json):
+                try:
+                    vulns.append(CodeVulnerability(**item))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     return CodeScanRecord(
         id=row.id,
         project_name=row.project_name,
@@ -189,6 +207,7 @@ def _row_to_code_scan(row: Any) -> CodeScanRecord:
         files_analyzed=row.files_analyzed or 0,
         ai_provider=row.ai_provider,
         scanned_at=scanned_at,
+        vulnerabilities=vulns,
     )
 
 
@@ -214,8 +233,15 @@ class SQLRepository:
                 stmt = statement.strip()
                 if stmt:
                     await conn.execute(text(stmt))
+            # Migration: add vulnerabilities_json if table existed without it
+            try:
+                await conn.execute(
+                    text("ALTER TABLE code_scan_history ADD COLUMN vulnerabilities_json TEXT")
+                )
+            except Exception:
+                pass  # column already exists
         logger.info("Database connected: %s", database_url)
-        logger.info("Tables verified: scan_history, cve_exceptions")
+        logger.info("Tables verified: scan_history, cve_exceptions, code_scan_history")
         return cls(engine, session_factory)
 
     async def save_scan(self, record: ScanRecord) -> None:
@@ -309,15 +335,21 @@ class SQLRepository:
             await session.commit()
 
     async def save_code_scan(self, record: CodeScanRecord) -> None:
+        import json as _json
+        vulns_json = _json.dumps(
+            [v.model_dump() for v in record.vulnerabilities]
+        ) if record.vulnerabilities else None
+
         async with self._session_factory() as session:
             await session.execute(
                 text(
                     "INSERT INTO code_scan_history "
                     "(project_name, commit_sha, branch, decision, critical_count, "
-                    "high_count, medium_count, low_count, files_analyzed, ai_provider) "
+                    "high_count, medium_count, low_count, files_analyzed, ai_provider, "
+                    "vulnerabilities_json) "
                     "VALUES (:project_name, :commit_sha, :branch, :decision, "
                     ":critical_count, :high_count, :medium_count, :low_count, "
-                    ":files_analyzed, :ai_provider)"
+                    ":files_analyzed, :ai_provider, :vulnerabilities_json)"
                 ),
                 {
                     "project_name": record.project_name,
@@ -330,6 +362,7 @@ class SQLRepository:
                     "low_count": record.low_count,
                     "files_analyzed": record.files_analyzed,
                     "ai_provider": record.ai_provider,
+                    "vulnerabilities_json": vulns_json,
                 },
             )
             await session.commit()

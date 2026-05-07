@@ -53,7 +53,7 @@ class CodeGateService:
             decision, reason = code_rules.evaluate(summary)
             ai_provider = self._analyzer.analyzer_name
 
-        await self._persist(report, decision, reason, summary, len(report.files), ai_provider)
+        await self._persist(report, decision, reason, summary, len(report.files), ai_provider, all_vulns)
 
         logger.info(
             "Code scan decision for '%s': %s (%d vulns across %d files)",
@@ -84,6 +84,7 @@ class CodeGateService:
         summary: VulnerabilitySummary,
         files_analyzed: int,
         ai_provider: str | None,
+        vulnerabilities: list[CodeVulnerability] | None = None,
     ) -> None:
         record = CodeScanRecord(
             project_name=report.project_name,
@@ -97,5 +98,6 @@ class CodeGateService:
             files_analyzed=files_analyzed,
             ai_provider=ai_provider,
             scanned_at=datetime.now(tz=timezone.utc),
+            vulnerabilities=vulnerabilities or [],
         )
         await self._repo.save_code_scan(record)
