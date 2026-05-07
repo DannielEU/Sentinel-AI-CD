@@ -58,6 +58,7 @@ jobs:
             -f "${{ env.SENTINEL_DOCKERFILE }}" \
             .
 
+        # preparación de lectura
       # ── 4. Instalar Trivy ────────────────────────────────────────────────────
       - name: Install Trivy
         run: |
