@@ -592,7 +592,7 @@ _DASHBOARD_JS = """
     var q=(si?si.value:'').toLowerCase();
     document.querySelectorAll('#scan-table tbody .scan-row').forEach(function(row){
       var ok=!q||row.textContent.toLowerCase().indexOf(q)!==-1;
-      row.style.display=ok?'':'none';
+      if(ok){row.classList.remove('filter-hidden');}else{row.classList.add('filter-hidden');row.style.display='none';}
       var det=row.nextElementSibling;
       if(det&&det.classList.contains('detail-row')){det.style.display='none';var ic=row.querySelector('.exp-icon');if(ic)ic.classList.remove('open');}
     });
@@ -602,7 +602,7 @@ _DASHBOARD_JS = """
 
   /* Pagination */
   var PAGE=10,curPage=1;
-  function visRows(){return Array.from(document.querySelectorAll('#scan-table tbody .scan-row')).filter(function(r){return r.style.display!=='none';});}
+  function visRows(){return Array.from(document.querySelectorAll('#scan-table tbody .scan-row')).filter(function(r){return !r.classList.contains('filter-hidden');});}
   function applyPage(p){
     var rows=visRows(),tp=Math.max(1,Math.ceil(rows.length/PAGE));
     curPage=Math.min(Math.max(1,p),tp);
@@ -763,14 +763,14 @@ def _donut_chart_svg(approved: int, warning: int, rejected: int) -> str:
         f'<text x="{cx}" y="{cy + 16}" text-anchor="middle" style="fill:var(--muted)" font-size="12">Total Scans</text>'
     )
     for i, (count, color, label) in enumerate(segs):
-        lx = 10 + i * 73
+        ly = 235 + i * 18
         pct = int(count / total * 100) if total > 0 else 0
         parts.append(
-            f'<rect x="{lx}" y="230" width="14" height="14" rx="3" fill="{color}"/>'
-            f'<text x="{lx + 18}" y="242" style="fill:var(--muted)" font-size="11">{label} {pct}%</text>'
+            f'<rect x="10" y="{ly}" width="14" height="14" rx="3" fill="{color}"/>'
+            f'<text x="28" y="{ly + 11}" style="fill:var(--muted)" font-size="11">{label} {pct}%</text>'
         )
     return (
-        f'<svg viewBox="0 0 220 260" style="width:100%;max-width:240px;display:block;margin:0 auto">\n'
+        f'<svg viewBox="0 0 220 285" style="width:100%;max-width:240px;display:block;margin:0 auto">\n'
         + "\n".join(parts)
         + "\n</svg>"
     )
@@ -1119,7 +1119,7 @@ async def dashboard_overview(request: Request):
     return _render_dashboard("Security Overview", records, exceptions)
 
 
-@app.get("/dashboard/{image_name}", response_class=HTMLResponse, tags=["dashboard"])
+@app.get("/dashboard/{image_name:path}", response_class=HTMLResponse, tags=["dashboard"])
 async def dashboard_image(image_name: str, request: Request):
     """Security dashboard for a specific image — history and trend."""
     _require_dashboard_token(request)

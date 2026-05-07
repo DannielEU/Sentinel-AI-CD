@@ -219,6 +219,7 @@ class SQLRepository:
             return [_row_to_exc(r) for r in result.mappings().all()]
 
     async def add_exception(self, exc: CVEException) -> None:
+        expires_at = exc.expires_at.replace(tzinfo=None) if exc.expires_at else None
         async with self._session_factory() as session:
             await session.execute(
                 text(
@@ -232,7 +233,7 @@ class SQLRepository:
                     "cve_id": exc.cve_id.upper(),
                     "reason": exc.reason,
                     "approved_by": exc.approved_by,
-                    "expires_at": exc.expires_at,
+                    "expires_at": expires_at,
                 },
             )
             await session.commit()
