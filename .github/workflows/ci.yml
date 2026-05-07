@@ -77,9 +77,9 @@ jobs:
       - name: Checkout HexaFlow
         uses: actions/checkout@v4
         with:
-          repository: DannielEU/HexaFlow
+          repository: DannielEU/HexaFlow-AI
           ref: ${{ github.sha }}
-          path: HexaFlow
+          path: HexaFlow-AI
 
       - name: Set lowercase image name
         id: vars
@@ -116,7 +116,7 @@ jobs:
         id: ollama-cache
         uses: actions/cache@v4
         with:
-          path: HexaFlow/ollama-data
+          path: HexaFlow-AI/ollama-data
           key: ollama-model-${{ env.OLLAMA_MODEL }}-v1
           restore-keys: |
             ollama-model-${{ env.OLLAMA_MODEL }}-
@@ -124,7 +124,7 @@ jobs:
       # ── Start HexaFlow gate with docker compose ──────────────────────────────
       - name: Start HexaFlow services (Ollama + Gate) via docker compose
         run: |
-          cd HexaFlow
+          cd HexaFlow-AI
 
           echo "🚀 Starting docker compose services..."
           echo "🔍 DEBUG: AI_PROVIDER=$AI_PROVIDER (should be 'ollama' when AI is enabled)"
@@ -135,7 +135,7 @@ jobs:
           export AI_PROVIDER
           export OLLAMA_MODEL
           export OLLAMA_URL="http://ollama:11434"
-          export OLLAMA_DATA_PATH="${GITHUB_WORKSPACE}/HexaFlow/ollama-data"
+          export OLLAMA_DATA_PATH="${GITHUB_WORKSPACE}/HexaFlow-AI/ollama-data"
           export MAX_IMAGE_SIZE_MB
           export MAX_HIGH_VULNS
           export MAX_MEDIUM_VULNS
@@ -360,7 +360,7 @@ jobs:
           AI_PROVIDER: ${{ env.AI_ENABLED == 'true' && 'ollama' || 'disabled' }}
           OLLAMA_URL: http://ollama:11434
           OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
-          OLLAMA_DATA_PATH: ${{ github.workspace }}/HexaFlow/ollama-data
+          OLLAMA_DATA_PATH: ${{ github.workspace }}/HexaFlow-AI/ollama-data
           MAX_IMAGE_SIZE_MB: ${{ env.MAX_IMAGE_SIZE_MB }}
           MAX_HIGH_VULNS: ${{ env.MAX_HIGH_VULNS }}
           MAX_MEDIUM_VULNS: ${{ env.MAX_MEDIUM_VULNS }}
@@ -370,7 +370,7 @@ jobs:
         if: steps.ollama-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: HexaFlow/ollama-data
+          path: HexaFlow-AI/ollama-data
           key: ollama-model-${{ env.OLLAMA_MODEL }}-v1
 
       # ── Verify gate is accessible ───────────────────────────────────────────
@@ -393,7 +393,7 @@ jobs:
           echo ""
 
           set +e
-          python3 HexaFlow/pipeline/trivy_to_gate.py \
+          python3 HexaFlow-AI/pipeline/trivy_to_gate.py \
             --report trivy_report.json \
             --image  "${{ steps.vars.outputs.image_name }}" \
             --gate   "$GATE_URL" \
