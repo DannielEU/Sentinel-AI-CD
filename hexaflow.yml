@@ -8,13 +8,13 @@
 #
 #   Variables (vars.*):
 #     HEXAFLOW_GATE_URL    URL del gate desplegado
-#                          default: https://hexaflow-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net
-#     SENTINEL_AI_ENABLED  "true" | "false"   (default: "true")
-#                          false → el gate se llama igualmente pero sin IA activa en servidor
-#     SENTINEL_DOCKERFILE  ruta al Dockerfile  (default: "Dockerfile")
+#                          default: https://sentinelia-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net
+#     HEXAFLOW_AI_ENABLED  "true" | "false"   (default: "true")
+#     HEXAFLOW_DOCKERFILE  ruta al Dockerfile  (default: "Dockerfile")
+#                          ejemplos: "docker/Dockerfile", "frontend/Dockerfile"
 #
 #   Secrets (secrets.*):
-#     SENTINEL_TOKEN       Bearer token de autenticación del gate
+#     HEXAFLOW_TOKEN       Bearer token de autenticación del gate
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: HexaFlow Security Gate
@@ -32,39 +32,57 @@ jobs:
     name: Trivy → HexaFlow Gate
     runs-on: ubuntu-latest
 
-    env:
-      HEXAFLOW_GATE_URL: ${{ vars.HEXAFLOW_GATE_URL || 'https://hexaflow-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net' }}
-      SENTINEL_AI_ENABLED: ${{ vars.SENTINEL_AI_ENABLED || 'true' }}
-      SENTINEL_DOCKERFILE: ${{ vars.SENTINEL_DOCKERFILE || 'Dockerfile' }}
-
     steps:
 
       # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Nombre de imagen en minúsculas ────────────────────────────────────
+      # ── 2. Resolver configuración con fallbacks seguros ──────────────────────
+      # Se usan variables de shell (${VAR:-default}) en lugar de expresiones
+      # GHA para garantizar que los fallbacks funcionen aunque la variable
+      # no esté definida en Settings → Variables.
+      - name: Resolve config
+        id: config
+        env:
+          _GATE_URL:    ${{ vars.HEXAFLOW_GATE_URL }}
+          _AI_ENABLED:  ${{ vars.HEXAFLOW_AI_ENABLED }}
+          _DOCKERFILE:  ${{ vars.HEXAFLOW_DOCKERFILE }}
+        run: |
+          GATE_URL="${_GATE_URL:-https://sentinelia-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net}"
+          AI_ENABLED="${_AI_ENABLED:-true}"
+          DOCKERFILE="${_DOCKERFILE:-Dockerfile}"
+
+          echo "gate_url=${GATE_URL}"     >> "$GITHUB_OUTPUT"
+          echo "ai_enabled=${AI_ENABLED}" >> "$GITHUB_OUTPUT"
+          echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
+
+          echo "Gate URL    : ${GATE_URL}"
+          echo "AI enabled  : ${AI_ENABLED}"
+          echo "Dockerfile  : ${DOCKERFILE}"
+
+      # ── 3. Nombre de imagen en minúsculas ────────────────────────────────────
       - name: Set image name
         id: vars
         run: |
           IMAGE=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "image=${IMAGE}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
-      # ── 3. Build Docker image ────────────────────────────────────────────────
+      # ── 4. Build Docker image ────────────────────────────────────────────────
       - name: Build Docker image
         run: |
           docker build \
             -t "${{ steps.vars.outputs.image }}" \
-            -f "${{ env.SENTINEL_DOCKERFILE }}" \
+            -f "${{ steps.config.outputs.dockerfile }}" \
             .
 
-      # ── 4. Instalar Trivy ────────────────────────────────────────────────────
+      # ── 5. Instalar Trivy ────────────────────────────────────────────────────
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
             | sh -s -- -b /usr/local/bin
 
-      # ── 5. Escanear con Trivy ────────────────────────────────────────────────
+      # ── 6. Escanear con Trivy ────────────────────────────────────────────────
       - name: Scan with Trivy
         run: |
           trivy image \
@@ -77,14 +95,14 @@ jobs:
           echo "── Trivy table summary ──"
           trivy image --format table --exit-code 0 "${{ steps.vars.outputs.image }}"
 
-      # ── 6. Enviar al HexaFlow Gate ───────────────────────────────────────────
+      # ── 7. Enviar al HexaFlow Gate ───────────────────────────────────────────
       - name: Send to HexaFlow Gate
         id: gate
         env:
-          IMAGE_NAME: ${{ steps.vars.outputs.image }}
-          HEXAFLOW_GATE_URL: ${{ env.HEXAFLOW_GATE_URL }}
-          SENTINEL_TOKEN: ${{ secrets.SENTINEL_TOKEN }}
-          SENTINEL_AI_ENABLED: ${{ env.SENTINEL_AI_ENABLED }}
+          IMAGE_NAME:       ${{ steps.vars.outputs.image }}
+          HEXAFLOW_GATE_URL: ${{ steps.config.outputs.gate_url }}
+          HEXAFLOW_TOKEN:   ${{ secrets.HEXAFLOW_TOKEN }}
+          HEXAFLOW_AI_ENABLED: ${{ steps.config.outputs.ai_enabled }}
         run: |
           python3 << 'PYEOF'
           import json, os, sys, urllib.request, urllib.error
@@ -100,25 +118,19 @@ jobs:
                   if sev in counts:
                       counts[sev] += 1
 
-          # Tamaño de imagen desde metadatos Trivy (si está disponible)
-          size_mb = 0
           metadata = trivy.get("Metadata", {})
-          image_config = metadata.get("ImageConfig", {})
-          # Trivy no siempre expone el tamaño; usamos 0 como fallback
-          size_mb = metadata.get("Size", 0) // (1024 * 1024) if metadata.get("Size") else 0
-
-          # Sistema operativo desde Trivy
-          os_info = trivy.get("Metadata", {}).get("OS", {})
+          size_mb  = metadata.get("Size", 0) // (1024 * 1024) if metadata.get("Size") else 0
+          os_info  = metadata.get("OS", {})
           os_family = os_info.get("Family", "unknown")
 
           image_name  = os.environ["IMAGE_NAME"]
           gate_url    = os.environ.get("HEXAFLOW_GATE_URL", "").rstrip("/")
-          token       = os.environ.get("SENTINEL_TOKEN", "")
-          ai_enabled  = os.environ.get("SENTINEL_AI_ENABLED", "true").lower() == "true"
+          token       = os.environ.get("HEXAFLOW_TOKEN", "")
+          ai_enabled  = os.environ.get("HEXAFLOW_AI_ENABLED", "true").lower() == "true"
 
           payload = {
               "image_name":    image_name,
-              "image_size_mb": size_mb,
+              "image_size_mb": size_mb if size_mb > 0 else 1,
               "vulnerabilities": counts,
               "base_image":    trivy.get("ArtifactName", "unknown"),
               "os_family":     os_family,
@@ -148,7 +160,6 @@ jobs:
           except urllib.error.HTTPError as e:
               body = e.read().decode()
               print(f"Gate HTTP error {e.code}: {body}")
-              # Escribimos salida para que no quede vacío
               with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
                   gh.write("gate_decision=ERROR\ngate_exit=3\n")
               sys.exit(3)
@@ -176,14 +187,14 @@ jobs:
               gh.write(f"gate_exit={exit_code}\n")
           PYEOF
 
-      # ── 7. Construir comentario de PR ────────────────────────────────────────
+      # ── 8. Construir comentario de PR ────────────────────────────────────────
       - name: Build PR comment
         if: always()
         env:
-          GATE_DECISION: ${{ steps.gate.outputs.gate_decision }}
-          IMAGE_NAME: ${{ steps.vars.outputs.image }}
-          SENTINEL_AI_ENABLED: ${{ env.SENTINEL_AI_ENABLED }}
-          HEXAFLOW_GATE_URL: ${{ env.HEXAFLOW_GATE_URL }}
+          GATE_DECISION:       ${{ steps.gate.outputs.gate_decision }}
+          IMAGE_NAME:          ${{ steps.vars.outputs.image }}
+          HEXAFLOW_AI_ENABLED: ${{ steps.config.outputs.ai_enabled }}
+          HEXAFLOW_GATE_URL:   ${{ steps.config.outputs.gate_url }}
         run: |
           python3 << 'PYEOF'
           import json, os, datetime
@@ -191,7 +202,7 @@ jobs:
 
           decision   = os.environ.get("GATE_DECISION", "UNKNOWN")
           image_name = os.environ.get("IMAGE_NAME", "-")
-          ai_enabled = os.environ.get("SENTINEL_AI_ENABLED", "true").lower() == "true"
+          ai_enabled = os.environ.get("HEXAFLOW_AI_ENABLED", "true").lower() == "true"
           gate_url   = os.environ.get("HEXAFLOW_GATE_URL", "")
           ts         = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
@@ -217,8 +228,8 @@ jobs:
                           "title": v.get("Title", "")[:80],
                       })
 
-          icon       = {"APPROVED": "✅", "WARNING": "⚠️", "REJECTED": "❌"}.get(decision, "❓")
-          ai_status  = "habilitada" if ai_enabled else "deshabilitada"
+          icon      = {"APPROVED": "✅", "WARNING": "⚠️", "REJECTED": "❌"}.get(decision, "❓")
+          ai_status = "habilitada" if ai_enabled else "deshabilitada"
 
           lines = [
               f"## {icon} HexaFlow Security Gate — {decision}",
@@ -251,7 +262,6 @@ jobs:
               if len(crit_high) > 25:
                   lines.append(f"_…y {len(crit_high) - 25} más — ver artefacto completo._")
 
-          # Feedback del gate (IA o rule engine)
           try:
               with open("gate_response.json") as f:
                   gr = json.load(f)
@@ -286,7 +296,7 @@ jobs:
               ]
 
           if gate_url:
-              lines += ["", f"---", f"_Gate: {gate_url}_"]
+              lines += ["", "---", f"_Gate: {gate_url}_"]
 
           with open("pr_comment.md", "w") as f:
               f.write("\n".join(lines))
@@ -294,14 +304,14 @@ jobs:
           print("pr_comment.md escrito correctamente.")
           PYEOF
 
-      # ── 8. Publicar comentario en el PR ──────────────────────────────────────
+      # ── 9. Publicar comentario en el PR ──────────────────────────────────────
       - name: Post PR comment
         if: always() && github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           path: pr_comment.md
 
-      # ── 9. Subir artefactos ──────────────────────────────────────────────────
+      # ── 10. Subir artefactos ─────────────────────────────────────────────────
       - name: Upload security artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -313,7 +323,7 @@ jobs:
             gate_response.json
           retention-days: 30
 
-      # ── 10. Aplicar decisión del gate ─────────────────────────────────────────
+      # ── 11. Aplicar decisión del gate ────────────────────────────────────────
       - name: Enforce gate decision
         if: always()
         run: |
