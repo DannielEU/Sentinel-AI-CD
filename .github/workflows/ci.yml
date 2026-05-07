@@ -1,5 +1,4 @@
 name: CI · Security Gate · Deploy
-
 on:
   push:
     branches: [main, develop]
