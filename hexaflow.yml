@@ -51,15 +51,44 @@ jobs:
         run: |
           GATE_URL="${_GATE_URL:-https://sentinelia-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net}"
           AI_ENABLED="${_AI_ENABLED:-true}"
-          DOCKERFILE="${_DOCKERFILE:-Dockerfile}"
 
-          echo "gate_url=${GATE_URL}"     >> "$GITHUB_OUTPUT"
-          echo "ai_enabled=${AI_ENABLED}" >> "$GITHUB_OUTPUT"
-          echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
+          # --- Resolver ruta del Dockerfile ------------------------------------
+          # 1. Usa la variable de repo si está definida y el archivo existe
+          # 2. Si no, busca Dockerfile en ubicaciones comunes
+          # 3. Como último recurso hace find en el repo
+          if [ -n "$_DOCKERFILE" ] && [ -f "$_DOCKERFILE" ]; then
+            DOCKERFILE="$_DOCKERFILE"
+          elif [ -n "$_DOCKERFILE" ]; then
+            echo "⚠️  HEXAFLOW_DOCKERFILE='${_DOCKERFILE}' definida pero el archivo no existe."
+            echo "   Archivos disponibles en el repo:"
+            find . -name "Dockerfile*" | sort
+            exit 1
+          elif [ -f "Dockerfile" ]; then
+            DOCKERFILE="Dockerfile"
+          elif [ -f "app/Dockerfile" ]; then
+            DOCKERFILE="app/Dockerfile"
+          else
+            DOCKERFILE=$(find . -maxdepth 4 -name "Dockerfile" | sort | head -1 | sed 's|^\./||')
+            if [ -z "$DOCKERFILE" ]; then
+              echo "❌ No se encontró ningún Dockerfile en el repositorio."
+              exit 1
+            fi
+          fi
 
-          echo "Gate URL    : ${GATE_URL}"
-          echo "AI enabled  : ${AI_ENABLED}"
-          echo "Dockerfile  : ${DOCKERFILE}"
+          # El contexto de build es la carpeta que contiene el Dockerfile
+          DOCKER_CONTEXT=$(dirname "$DOCKERFILE")
+          # dirname de "Dockerfile" devuelve "."; normalizamos
+          [ "$DOCKER_CONTEXT" = "." ] && DOCKER_CONTEXT="."
+
+          echo "gate_url=${GATE_URL}"               >> "$GITHUB_OUTPUT"
+          echo "ai_enabled=${AI_ENABLED}"           >> "$GITHUB_OUTPUT"
+          echo "dockerfile=${DOCKERFILE}"           >> "$GITHUB_OUTPUT"
+          echo "docker_context=${DOCKER_CONTEXT}"   >> "$GITHUB_OUTPUT"
+
+          echo "Gate URL       : ${GATE_URL}"
+          echo "AI enabled     : ${AI_ENABLED}"
+          echo "Dockerfile     : ${DOCKERFILE}"
+          echo "Docker context : ${DOCKER_CONTEXT}"
 
       # ── 3. Nombre de imagen en minúsculas ────────────────────────────────────
       - name: Set image name
@@ -74,7 +103,7 @@ jobs:
           docker build \
             -t "${{ steps.vars.outputs.image }}" \
             -f "${{ steps.config.outputs.dockerfile }}" \
-            .
+            "${{ steps.config.outputs.docker_context }}"
 
       # ── 5. Instalar Trivy ────────────────────────────────────────────────────
       - name: Install Trivy

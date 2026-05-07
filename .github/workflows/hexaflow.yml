@@ -8,7 +8,7 @@
 #
 #   Variables (vars.*):
 #     HEXAFLOW_GATE_URL    URL del gate desplegado
-#                          default: https://hexaflow-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net
+#                          default: https://sentinelia-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net
 #     SENTINEL_AI_ENABLED  "true" | "false"   (default: "true")
 #                          false → el gate se llama igualmente pero sin IA activa en servidor
 #     SENTINEL_DOCKERFILE  ruta al Dockerfile  (default: "Dockerfile")
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      HEXAFLOW_GATE_URL: ${{ vars.HEXAFLOW_GATE_URL || 'https://hexaflow-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net' }}
+      HEXAFLOW_GATE_URL: ${{ vars.HEXAFLOW_GATE_URL || 'https://sentinelia-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net' }}
       SENTINEL_AI_ENABLED: ${{ vars.SENTINEL_AI_ENABLED || 'true' }}
       SENTINEL_DOCKERFILE: ${{ vars.SENTINEL_DOCKERFILE || 'Dockerfile' }}
 
