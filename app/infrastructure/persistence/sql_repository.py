@@ -191,10 +191,10 @@ class SQLRepository:
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT * FROM scan_history WHERE image_name = :name "
+                    "SELECT * FROM scan_history WHERE image_name LIKE :name "
                     "ORDER BY scanned_at DESC LIMIT :limit"
                 ),
-                {"name": image_name, "limit": limit},
+                {"name": f"%{image_name}%", "limit": limit},
             )
             return [_row_to_scan(r) for r in result.mappings().all()]
 

@@ -1133,7 +1133,7 @@ async def dashboard_image(image_name: str, request: Request):
         raise HTTPException(status_code=400, detail="Invalid image name format")
     records = await _repo.get_history(decoded, limit=30)
     exceptions = await _repo.get_active_exceptions()
-    return _render_dashboard(f"Image: {decoded}", records, exceptions)
+    return _render_dashboard(f"Image search: {decoded}", records, exceptions)
 
 
 # ── Global exception handler ──────────────────────────────────────────────────
