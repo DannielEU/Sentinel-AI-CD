@@ -39,45 +39,31 @@ def build_code_analysis_prompt(filename: str, content: str) -> str:
     language = _detect_language(filename)
     truncated = content[:_MAX_CONTENT_CHARS]
 
-    return f"""You are HexaFlow Code Analyzer, an automated OWASP security scanner integrated into a CI/CD pipeline.
-Analyze the following {language} source code file for security vulnerabilities.
+    return f"""You are a security code reviewer. Find security vulnerabilities in this {language} file.
 
 FILE: {filename}
-LANGUAGE: {language}
 
-FOCUS AREAS (CWE references):
-- SQL Injection (CWE-89)
-- Cross-Site Scripting XSS (CWE-79)
-- Hardcoded Secrets/Credentials (CWE-798)
-- Broken Authentication / Improper Auth (CWE-287)
-- Command Injection (CWE-78)
-- Path Traversal (CWE-22)
-- XML External Entity XXE (CWE-611)
-- Deserialization of Untrusted Data (CWE-502)
-- Sensitive Data Exposure (CWE-311)
-- Security Misconfiguration (CWE-16)
+Look for: hardcoded passwords/secrets/credentials, SQL injection, command injection, \
+broken authentication (plaintext passwords), sensitive data in logs, path traversal, XSS, \
+insecure configurations, exposed API keys or connection strings.
 
-SEVERITY CLASSIFICATION:
-- CRITICAL: exploitable remotely without authentication, direct data breach risk
-- HIGH: significant risk, exploitable with minimal effort or auth
-- MEDIUM: requires specific conditions or privileges to exploit
-- LOW: defense-in-depth improvement, best practice violation
-
-SOURCE CODE:
-```
+CODE:
 {truncated}
-```
 
-Return ONLY a valid JSON array. No markdown, no explanation, no text outside the array.
-Each item must have exactly these fields:
-- "type": vulnerability type name (string)
-- "severity": one of CRITICAL, HIGH, MEDIUM, LOW (string)
-- "line_number": approximate line number, 0 if unknown (integer)
-- "description": what the vulnerability is and why it is dangerous (string, max 300 chars)
-- "code_snippet": the vulnerable code fragment (string, max 200 chars)
-- "suggestion": concrete actionable fix (string, max 300 chars)
-- "cwe_id": CWE identifier e.g. "CWE-89" (string)
+Output a JSON array of findings. Each finding must have these fields:
+- "type": short vulnerability name
+- "severity": CRITICAL, HIGH, MEDIUM, or LOW
+- "line_number": integer (0 if unknown)
+- "description": what is wrong and why it is dangerous
+- "code_snippet": the vulnerable code (short)
+- "suggestion": how to fix it
+- "cwe_id": e.g. "CWE-798"
 
-If no vulnerabilities are found, return exactly: []
+Severity guide: CRITICAL=remote exploit no auth, HIGH=serious risk easy to exploit, \
+MEDIUM=requires conditions, LOW=best practice issue.
 
-Format: [{{"type": "", "severity": "", "line_number": 0, "description": "", "code_snippet": "", "suggestion": "", "cwe_id": ""}}]"""
+Important: hardcoded database URLs with username:password ARE critical vulnerabilities (CWE-798).
+Plaintext password comparison without hashing IS a high vulnerability (CWE-256).
+Logging user PII/tokens IS a medium vulnerability (CWE-532).
+
+Output ONLY the JSON array, no other text. If nothing found, output: []"""

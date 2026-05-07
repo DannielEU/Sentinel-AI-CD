@@ -609,9 +609,13 @@ html{transition:background-color .2s,color .2s}
   --bg:#f4f2ff;--bg2:#ebe8f9;--card:#fff;--card2:#f0eeff;
   --border:#b0a8e0;--border2:#cec8f0;
   --text:#0d0b1e;--text2:#474080;--muted:#6b6080;
+  --gold:#b45309;--yellow:#92400e;
+  --ok:#15803d;--err:#b91c1c;
 }
 [data-theme="light"] .topbar{box-shadow:0 2px 12px rgba(30,0,255,.08)}
 [data-theme="light"] .scan-row:hover td{background:rgba(30,0,255,.04)}
+[data-theme="light"] .vuln-l{color:#1d4ed8}
+[data-theme="light"] .dec-badge{filter:brightness(0.75)}
 /* Theme button */
 .theme-btn{background:none;border:1px solid var(--border2);border-radius:var(--rs);padding:6px 12px;cursor:pointer;color:var(--text2);display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:600;transition:all .15s;line-height:1}
 .theme-btn:hover{background:var(--card2);border-color:var(--border);color:var(--text)}
