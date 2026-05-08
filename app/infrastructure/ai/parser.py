@@ -36,7 +36,7 @@ def parse_ai_response(raw: str) -> dict:
     recs = data.get("recommendations", [])
     if not isinstance(recs, list):
         recs = [str(recs)]
-    data["recommendations"] = [str(r) for r in recs]
+    data["recommendations"] = [str(r) for r in recs][:5]
 
     summary = data.get("summary")
     data["summary"] = str(summary)[:2000] if summary else None

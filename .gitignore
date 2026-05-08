@@ -17,6 +17,7 @@ env/
 .env
 .env.*
 !.env.example
+!.env.prod.example
 
 # Trivy reports (generated artifacts)
 trivy_report.json

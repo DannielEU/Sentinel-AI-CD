@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate secure authentication tokens for Sentinel AI-CD Gate.
+Generate secure authentication tokens for HexaFlow Gate.
 
 Usage:
     python3 generate_token.py                    # Generate 1 token
@@ -27,7 +27,7 @@ def hash_token(token: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate secure authentication tokens for Sentinel AI-CD"
+        description="Generate secure authentication tokens for HexaFlow"
     )
     parser.add_argument(
         "--count",
@@ -56,7 +56,7 @@ def main():
     args = parser.parse_args()
 
     print(f"\n{'='*80}")
-    print(f"🔐 Sentinel AI-CD Token Generator")
+    print("🔐 HexaFlow Token Generator")
     print(f"{'='*80}\n")
 
     tokens = []

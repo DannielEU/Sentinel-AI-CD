@@ -1,9 +1,9 @@
-# Sentinel-AI-CD — Docker Compose
+# HexaFlow — Docker Compose
 # Compatible: Local, Docker Compose, Azure Container Instances, Azure App Service, K8s
 #
 # Key variables:
 #   AI_PROVIDER      : ollama (default) | openai | anthropic | disabled
-#   DATABASE_URL     : sqlite+aiosqlite:///./data/sentinel.db  (empty = no DB)
+#   DATABASE_URL     : sqlite+aiosqlite:///./data/hexaflow.db  (empty = no DB)
 #   GATE_AUTH_TOKEN  : bearer token for API auth (optional)
 #   OLLAMA_MODEL     : mistral (default)
 #   OPENAI_API_KEY   : required when AI_PROVIDER=openai
@@ -25,7 +25,7 @@ services:
     environment:
       - OLLAMA_KEEP_ALIVE=5m
 
-  # ── Sentinel Gate — FastAPI Service ───────────────────────────────────────
+  # ── HexaFlow Gate — FastAPI Service ───────────────────────────────────────
   gate:
     build:
       context: .
@@ -35,7 +35,7 @@ services:
     ports:
       - "${GATE_PORT:-8000}:8000"
     volumes:
-      - sentinel-data:/app/data      # Persistent SQLite storage
+      - hexaflow-data:/app/data      # Persistent SQLite storage
     environment:
       # ── AI Provider ──────────────────────────────────────────────────────
       # Options: ollama | openai | anthropic | disabled
@@ -55,9 +55,9 @@ services:
 
       # ── Database ─────────────────────────────────────────────────────────
       # Leave empty to run without persistence (no history, no whitelist).
-      # SQLite:     sqlite+aiosqlite:///./data/sentinel.db
+      # SQLite:     sqlite+aiosqlite:///./data/hexaflow.db
       # PostgreSQL: postgresql+asyncpg://user:pass@host:5432/dbname
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/sentinel.db}
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/hexaflow.db}
 
       # ── Auth & Security ───────────────────────────────────────────────────
       - GATE_AUTH_TOKEN=${GATE_AUTH_TOKEN:-}
@@ -82,5 +82,5 @@ services:
       start_period: 15s
 
 volumes:
-  sentinel-data:
+  hexaflow-data:
     driver: local

@@ -1,4 +1,4 @@
-# Sentinel-AI-CD — Docker Compose LOCAL
+# HexaFlow — Docker Compose LOCAL
 # ======================================
 # Uso exclusivo para pruebas en máquina local.
 # Para producción/CD usa el docker-compose.yml de la raíz del proyecto.
@@ -11,7 +11,7 @@
 #
 #   B) Sin Ollama previo (lo arranca Docker Compose):
 #      docker compose --profile postgres --profile with-ollama up -d
-#      docker exec sentinel-local-ollama ollama pull mistral
+#      docker exec hexaflow-local-ollama ollama pull mistral
 #
 #   C) Sin base de datos (SQLite):
 #      docker compose up -d   (ajustar DATABASE_URL en .env)
@@ -26,7 +26,7 @@ services:
   # Si Ollama ya corre en tu máquina, NO uses este perfil.
   ollama:
     image: ollama/ollama:latest
-    container_name: sentinel-local-ollama
+    container_name: hexaflow-local-ollama
     profiles: [with-ollama]
     restart: unless-stopped
     ports:
@@ -36,17 +36,17 @@ services:
     environment:
       - OLLAMA_KEEP_ALIVE=10m
 
-  # ── Sentinel Gate — FastAPI ───────────────────────────────────────────────
+  # ── HexaFlow Gate — FastAPI ───────────────────────────────────────────────
   gate:
     build:
       context: ..
       dockerfile: app/Dockerfile
-    container_name: sentinel-local-gate
+    container_name: hexaflow-local-gate
     restart: unless-stopped
     ports:
       - "${GATE_PORT:-8000}:8000"
     volumes:
-      - sentinel-data:/app/data
+      - hexaflow-data:/app/data
     # Permite que el contenedor resuelva host.docker.internal → IP del host
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -55,7 +55,7 @@ services:
       - AI_PROVIDER=${AI_PROVIDER:-ollama}
       # OLLAMA_URL en .env controla a dónde apunta:
       #   Ollama en el host    → http://host.docker.internal:11434  (default)
-      #   Ollama en contenedor → http://sentinel-local-ollama:11434
+      #   Ollama en contenedor → http://hexaflow-local-ollama:11434
       - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -65,10 +65,10 @@ services:
 
       # ── Base de datos ─────────────────────────────────────────────────────
       # SQLite (default, sin servicios extra):
-      #   sqlite+aiosqlite:///./data/sentinel.db
+      #   sqlite+aiosqlite:///./data/hexaflow.db
       # PostgreSQL (requiere --profile postgres):
-      #   postgresql+asyncpg://sentinel:sentinel@db:5432/sentinel
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/sentinel.db}
+      #   postgresql+asyncpg://hexaflow:hexaflow@db:5432/hexaflow
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/hexaflow.db}
 
       # ── Auth y seguridad ──────────────────────────────────────────────────
       - GATE_AUTH_TOKEN=${GATE_AUTH_TOKEN:-}
@@ -93,27 +93,27 @@ services:
   # ── PostgreSQL — Base de datos persistente ────────────────────────────────
   # Activar con: --profile postgres
   # Cambiar DATABASE_URL en .env a:
-  #   postgresql+asyncpg://sentinel:sentinel@db:5432/sentinel
+  #   postgresql+asyncpg://hexaflow:hexaflow@db:5432/hexaflow
   db:
     image: postgres:16-alpine
-    container_name: sentinel-local-db
+    container_name: hexaflow-local-db
     profiles: [postgres]
     restart: unless-stopped
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-sentinel}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-sentinel}
-      - POSTGRES_DB=${POSTGRES_DB:-sentinel}
+      - POSTGRES_USER=${POSTGRES_USER:-hexaflow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hexaflow}
+      - POSTGRES_DB=${POSTGRES_DB:-hexaflow}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hexaflow}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
   ollama-data:
-  sentinel-data:
+  hexaflow-data:
   postgres-data:

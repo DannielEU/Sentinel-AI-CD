@@ -1,10 +1,10 @@
 name: CI · Security Gate · Deploy
 # ─────────────────────────────────────────────────────────────────────────────
-# Plantilla de integración de Sentinel en GitHub Actions.
+# Plantilla de integración de HexaFlow en GitHub Actions.
 # Copia este archivo a .github/workflows/ci.yml en tu proyecto y ajusta
 # las variables de entorno según tu stack.
 #
-# Sentinel repo : https://github.com/DannielEU/Sentinel-AI-CD
+# HexaFlow repo : https://github.com/DannielEU/HexaFlow
 # Rama          : main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -32,9 +32,9 @@ jobs:
       - name: Run tests with coverage
         run: python -m pytest --cov=. --cov-report=term-missing --cov-fail-under=80
 
-  # ── 2. Security Gate — Trivy + Sentinel ─────────────────────────────────
+  # ── 2. Security Gate — Trivy + HexaFlow ─────────────────────────────────
   security-gate:
-    name: Security Gate (Trivy + Sentinel)
+    name: Security Gate (Trivy + HexaFlow)
     runs-on: ubuntu-latest
     needs: test
     permissions:
@@ -43,13 +43,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Descarga Sentinel desde su rama activa
-      - name: Checkout Sentinel
+      # Descarga HexaFlow desde su rama activa
+      - name: Checkout HexaFlow
         uses: actions/checkout@v4
         with:
-          repository: DannielEU/Sentinel-AI-CD
+          repository: DannielEU/HexaFlow
           ref: main
-          path: Sentinel-AI-CD
+          path: HexaFlow
 
       # Normaliza el nombre de imagen a minúsculas (requerido por Docker)
       - name: Set image name
@@ -80,11 +80,11 @@ jobs:
             --exit-code 0 \
             ${{ steps.vars.outputs.image_name }}
 
-      # Levanta Sentinel con Ollama desactivado (solo motor de reglas)
-      - name: Start Sentinel gate
+      # Levanta HexaFlow con Ollama desactivado (solo motor de reglas)
+      - name: Start HexaFlow gate
         run: |
           pip install fastapi uvicorn httpx pydantic --quiet
-          cd Sentinel-AI-CD/app && AI_DISABLED=true uvicorn main:app --port 8000 &
+          cd HexaFlow/app && AI_DISABLED=true uvicorn main:app --port 8000 &
           for i in $(seq 1 15); do
             curl -sf http://localhost:8000/health && break
             sleep 2
@@ -94,11 +94,11 @@ jobs:
 
       # Llama al gate — NO hace exit 1 aquí para que el comentario y el
       # artifact se publiquen incluso cuando la decisión es REJECTED
-      - name: Run Sentinel security gate
+      - name: Run HexaFlow security gate
         id: gate
         run: |
           set +e
-          python3 Sentinel-AI-CD/pipeline/trivy_to_gate.py \
+          python3 HexaFlow/pipeline/trivy_to_gate.py \
             --report trivy_report.json \
             --image  "${{ steps.vars.outputs.image_name }}" \
             --gate   "$GATE_URL" \
@@ -163,7 +163,7 @@ jobs:
 
           # ── Comentario de PR (conciso) ────────────────────────────────────
           pr = [
-              f"## {icon} Sentinel Security Gate — {decision}",
+              f"## {icon} HexaFlow Security Gate — {decision}",
               f"_`{image_name}` · {ts} · AI: disabled (rule-engine only)_",
               "",
               "| Severity | Count |",
@@ -208,7 +208,7 @@ jobs:
 
           # ── Reporte completo para artifact ────────────────────────────────
           art = [
-              "# Sentinel Security Report",
+              "# HexaFlow Security Report",
               "",
               f"- **Decision:** {icon} {decision}",
               f"- **Image:** `{image_name}`",
@@ -287,7 +287,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sentinel-security-report
+          name: hexaflow-security-report
           path: |
             security_report.md
             trivy_report.json

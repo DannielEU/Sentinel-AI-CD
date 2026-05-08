@@ -1,0 +1,111 @@
+# HexaFlow — Docker Compose PRODUCCIÓN / AZURE
+# =====================================================
+# Uso: despliegue en Azure Container Instances, Azure App Service
+#      o cualquier VM/servidor con Docker.
+#
+# Arquitectura de producción:
+#   - HexaFlow Gate (este compose) → Azure
+#   - Ollama                       → EC2 externo (OLLAMA_URL apunta a él)
+#   - Base de datos                → Azure Database for PostgreSQL (externa)
+#   - La imagen se consume desde Azure Container Registry (ACR)
+#   - Todas las variables sensibles se inyectan desde el entorno o un .env.prod
+#
+# Inicio rápido:
+#   cp .env.prod.example .env.prod     # copiar plantilla
+#   nano .env.prod                     # configurar variables
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+services:
+
+  # ── HexaFlow Gate — FastAPI ───────────────────────────────────────────────
+  gate:
+    # Opción A — imagen desde Azure Container Registry (producción):
+    #   image: ${ACR_LOGIN_SERVER}/hexaflow-gate:${IMAGE_TAG:-latest}
+    # Opción B — build local (si no usas ACR todavía):
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+
+    container_name: hexaflow-gate
+    restart: unless-stopped
+
+    ports:
+      - "${GATE_PORT:-8000}:8000"
+
+    environment:
+      # ── Proveedor de IA ──────────────────────────────────────────────────
+      # Opciones: ollama | openai | anthropic | disabled
+      # ollama: apunta a la instancia EC2 via OLLAMA_URL
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+
+      # Ollama en EC2 (cuando AI_PROVIDER=ollama)
+      - OLLAMA_URL=${OLLAMA_URL:-http://CAMBIAR-POR-IP-EC2:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
+
+      # OpenAI (cuando AI_PROVIDER=openai)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+
+      # Azure OpenAI (cuando AI_PROVIDER=openai y se usa endpoint de Azure)
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT:-}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-2024-02-01}
+
+      # Anthropic (cuando AI_PROVIDER=anthropic)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+
+      # ── Base de datos (Azure PostgreSQL Flexible Server) ─────────────────
+      # Formato: postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME?ssl=require
+      # HOST = <servidor>.postgres.database.azure.com
+      - DATABASE_URL=${DATABASE_URL}
+
+      # ── Autenticación y seguridad ────────────────────────────────────────
+      # Generar con: python3 scripts/generate_token.py
+      - GATE_AUTH_TOKEN=${GATE_AUTH_TOKEN}
+      - DASHBOARD_TOKEN=${DASHBOARD_TOKEN:-}
+
+      # Rate limiting
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      - AUTH_FAILURE_LIMIT=${AUTH_FAILURE_LIMIT:-5}
+      - AUTH_FAILURE_WINDOW=${AUTH_FAILURE_WINDOW:-300}
+
+      # CORS — lista los orígenes de tus pipelines CI/CD o frontends
+      # Ejemplo: https://mi-ci.azure.com,https://github.com
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+
+      # Ocultar /docs en producción (recomendado)
+      - DISABLE_DOCS=${DISABLE_DOCS:-true}
+
+      # ── Umbrales del motor de reglas ─────────────────────────────────────
+      - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-1200}
+      - MAX_HIGH_VULNS=${MAX_HIGH_VULNS:-10}
+      - MAX_MEDIUM_VULNS=${MAX_MEDIUM_VULNS:-30}
+
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:8000/health', timeout=4); sys.exit(0 if r.status == 200 else 1)"
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 20s
+
+    # Límites de recursos — ajustar según el SKU de Azure que uses
+    deploy:
+      resources:
+        limits:
+          cpus: "${GATE_CPU_LIMIT:-1.0}"
+          memory: "${GATE_MEMORY_LIMIT:-512M}"
+        reservations:
+          cpus: "0.25"
+          memory: "256M"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

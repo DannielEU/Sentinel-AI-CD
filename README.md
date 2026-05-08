@@ -1,4 +1,4 @@
-# Sentinel-AI-CD
+# HexaFlow
 
 <div align="center">
 
@@ -62,7 +62,7 @@ flowchart TB
     P3[trivy_to_gate.py]
   end
 
-  subgraph Gate[Sentinel Gate - FastAPI]
+  subgraph Gate[HexaFlow Gate - FastAPI]
     API[/POST analyze-image/]
     APP[Gate Service]
     SEC[Secrets Detector]
@@ -136,7 +136,7 @@ flowchart LR
 sequenceDiagram
   autonumber
   participant CI as CI Pipeline
-  participant G as Sentinel API
+  participant G as HexaFlow API
   participant S as Secrets Detector
   participant R as Rule Engine
   participant A as AI Provider
@@ -188,7 +188,7 @@ flowchart LR
 
 ```bash
 git clone <repo>
-cd Sentinel-AI-CD
+cd HexaFlow
 docker compose up -d
 
 # Check status
@@ -524,7 +524,7 @@ AI_PROVIDER=disabled docker compose up gate
 
 ```mermaid
 flowchart TB
-  ROOT[Sentinel-AI-CD]
+  ROOT[HexaFlow]
   ROOT --> APP[app]
   ROOT --> PIPE[pipeline]
   ROOT --> SCHEMA[schema.sql]
@@ -595,7 +595,7 @@ cve_exceptions  -- CVE whitelist with optional expiry
 
 ---
 
-## Por Que Sentinel Es Diferente y Mejor
+## Por Que HexaFlow Es Diferente y Mejor
 
 - Security by design: combina reglas deterministicas con IA contextual, pero mantiene hard-stops que la IA no puede sobreescribir.
 - Menos falsos positivos operativos: whitelist de CVEs con expiracion y trazabilidad para excepciones justificadas.

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# scan.sh — Escanea una imagen Docker con Trivy y la envía a Sentinel Gate
+# scan.sh — Escanea una imagen Docker con Trivy y la envía a HexaFlow Gate
 #
 # Uso:
 #   ./scan.sh <imagen>                         # solo imagen
 #   ./scan.sh <imagen> <ruta/al/Dockerfile>    # imagen + Dockerfile (detección de secretos)
 #
 # Variables de entorno:
-#   GATE_URL    URL del gate Sentinel  (default: http://localhost:8000)
+#   GATE_URL    URL del gate HexaFlow  (default: http://localhost:8000)
 #   GATE_TOKEN  Bearer token del gate  (default: vacío)
 #
 # Ejemplos:
@@ -26,7 +26,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 
 echo -e "\n${BOLD}${CYAN}══════════════════════════════════════════════════${RESET}"
-echo -e "${BOLD}  Sentinel AI-CD — Escaneo Local${RESET}"
+echo -e "${BOLD}  HexaFlow — Escaneo Local${RESET}"
 echo -e "${BOLD}${CYAN}══════════════════════════════════════════════════${RESET}"
 echo -e "  Imagen : ${YELLOW}${IMAGE}${RESET}"
 echo -e "  Gate   : ${GATE_URL}"
@@ -34,7 +34,7 @@ echo -e "  Gate   : ${GATE_URL}"
 echo ""
 
 # ── 1. Verificar que el gate esté activo ──────────────────────────────────────
-echo -e "${BOLD}[1/3] Verificando gate Sentinel...${RESET}"
+echo -e "${BOLD}[1/3] Verificando gate HexaFlow...${RESET}"
 if ! curl -sf "${GATE_URL}/health" > /dev/null 2>&1; then
     echo -e "${RED}ERROR: No se puede conectar al gate en ${GATE_URL}${RESET}"
     echo -e "       Asegúrate de haber ejecutado: ${BOLD}docker compose up -d${RESET}"
@@ -57,8 +57,8 @@ docker run --rm \
 
 echo -e "  ${GREEN}Reporte generado: ${REPORT_FILE}${RESET}"
 
-# ── 3. Enviar a Sentinel Gate ─────────────────────────────────────────────────
-echo -e "\n${BOLD}[3/3] Enviando al gate Sentinel...${RESET}"
+# ── 3. Enviar a HexaFlow Gate ─────────────────────────────────────────────────
+echo -e "\n${BOLD}[3/3] Enviando al gate HexaFlow...${RESET}"
 
 ARGS=(
     "--report" "${REPORT_FILE}"

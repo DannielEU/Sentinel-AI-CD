@@ -1,5 +1,4 @@
 name: CI · Security Gate · Deploy
-
 on:
   push:
     branches: [main, develop]
@@ -58,10 +57,10 @@ jobs:
           python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" && echo " CI workflow is valid"
 
   # ─────────────────────────────────────────────────────────────────────────
-  # 2. Security Gate (Trivy → Sentinel)
+  # 2. Security Gate (Trivy → HexaFlow)
   # ─────────────────────────────────────────────────────────────────────────
   security-gate:
-    name: Security Gate (Trivy + Sentinel)
+    name: Security Gate (Trivy + HexaFlow)
     runs-on: ubuntu-latest
     # Run on every PR and on pushes to main/develop
     needs: test
@@ -71,23 +70,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Checkout Sentinel desde la misma ref que disparó el workflow ─────
+      # ── Checkout HexaFlow desde la misma ref que disparó el workflow ─────
       # IMPORTANT: must use the triggering SHA (not a fixed branch) so that
       # changes pushed to develop are actually tested. Pinning ref: main caused
       # the gate container to be built from stale code, ignoring local fixes.
-      - name: Checkout Sentinel
+      - name: Checkout HexaFlow
         uses: actions/checkout@v4
         with:
-          repository: DannielEU/Sentinel-AI-CD
+          repository: DannielEU/HexaFlow-AI
           ref: ${{ github.sha }}
-          path: Sentinel-AI-CD
+          path: HexaFlow-AI
 
       - name: Set lowercase image name
         id: vars
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "image_name=${IMAGE_NAME}:${{ github.sha }}" >> $GITHUB_OUTPUT
-      # ── Build the Sentinel app image ──────────────────────────────────────
+      # ── Build the HexaFlow app image ──────────────────────────────────────
       - name: Build Docker image
         run: docker build -t ${{ steps.vars.outputs.image_name }} -f app/Dockerfile .
 
@@ -117,15 +116,15 @@ jobs:
         id: ollama-cache
         uses: actions/cache@v4
         with:
-          path: Sentinel-AI-CD/ollama-data
+          path: HexaFlow-AI/ollama-data
           key: ollama-model-${{ env.OLLAMA_MODEL }}-v1
           restore-keys: |
             ollama-model-${{ env.OLLAMA_MODEL }}-
 
-      # ── Start Sentinel gate with docker compose ──────────────────────────────
-      - name: Start Sentinel services (Ollama + Gate) via docker compose
+      # ── Start HexaFlow gate with docker compose ──────────────────────────────
+      - name: Start HexaFlow services (Ollama + Gate) via docker compose
         run: |
-          cd Sentinel-AI-CD
+          cd HexaFlow-AI
 
           echo "🚀 Starting docker compose services..."
           echo "🔍 DEBUG: AI_PROVIDER=$AI_PROVIDER (should be 'ollama' when AI is enabled)"
@@ -136,7 +135,7 @@ jobs:
           export AI_PROVIDER
           export OLLAMA_MODEL
           export OLLAMA_URL="http://ollama:11434"
-          export OLLAMA_DATA_PATH="${GITHUB_WORKSPACE}/Sentinel-AI-CD/ollama-data"
+          export OLLAMA_DATA_PATH="${GITHUB_WORKSPACE}/HexaFlow-AI/ollama-data"
           export MAX_IMAGE_SIZE_MB
           export MAX_HIGH_VULNS
           export MAX_MEDIUM_VULNS
@@ -144,7 +143,7 @@ jobs:
           docker compose up -d
 
           echo ""
-          echo "⏳ Waiting for Sentinel gate to be ready (max 60 seconds)..."
+          echo "⏳ Waiting for HexaFlow gate to be ready (max 60 seconds)..."
           GATE_READY=false
           for i in $(seq 1 30); do
             echo "  [$i/30] Checking http://localhost:8000/health..."
@@ -361,7 +360,7 @@ jobs:
           AI_PROVIDER: ${{ env.AI_ENABLED == 'true' && 'ollama' || 'disabled' }}
           OLLAMA_URL: http://ollama:11434
           OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
-          OLLAMA_DATA_PATH: ${{ github.workspace }}/Sentinel-AI-CD/ollama-data
+          OLLAMA_DATA_PATH: ${{ github.workspace }}/HexaFlow-AI/ollama-data
           MAX_IMAGE_SIZE_MB: ${{ env.MAX_IMAGE_SIZE_MB }}
           MAX_HIGH_VULNS: ${{ env.MAX_HIGH_VULNS }}
           MAX_MEDIUM_VULNS: ${{ env.MAX_MEDIUM_VULNS }}
@@ -371,7 +370,7 @@ jobs:
         if: steps.ollama-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: Sentinel-AI-CD/ollama-data
+          path: HexaFlow-AI/ollama-data
           key: ollama-model-${{ env.OLLAMA_MODEL }}-v1
 
       # ── Verify gate is accessible ───────────────────────────────────────────
@@ -382,7 +381,7 @@ jobs:
           echo ""
 
       # ── Call the gate via trivy_to_gate.py ───────────────────────────────
-      - name: Run Sentinel security gate
+      - name: Run HexaFlow security gate
         id: gate
         # exit 2 (WARNING) → capture, pipeline continues
         # exit 1 (REJECTED) → saved to output, pipeline fails AFTER comment is posted
@@ -394,7 +393,7 @@ jobs:
           echo ""
 
           set +e
-          python3 Sentinel-AI-CD/pipeline/trivy_to_gate.py \
+          python3 HexaFlow-AI/pipeline/trivy_to_gate.py \
             --report trivy_report.json \
             --image  "${{ steps.vars.outputs.image_name }}" \
             --gate   "$GATE_URL" \
@@ -533,7 +532,7 @@ jobs:
           ai_provider = os.environ.get("AI_PROVIDER", "disabled")
           ai_status = f"enabled ({ai_provider})" if ai_provider != "disabled" else "disabled (rule-engine only)"
           pr_lines = [
-              f"## {icon} Sentinel Security Gate — {decision}",
+              f"## {icon} HexaFlow Security Gate — {decision}",
               f"_Scanned: `{image_name}` · {ts} · AI analysis: {ai_status}_",
               "",
               "### Vulnerability summary",
@@ -620,7 +619,7 @@ jobs:
 
           # ── Full artifact report (detailed) ───────────────────────────────
           art_lines = [
-              f"# Sentinel Security Report",
+              f"# HexaFlow Security Report",
               f"",
               f"- **Decision:** {icon} {decision}",
               f"- **Image:** `{image_name}`",
@@ -702,7 +701,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sentinel-security-report
+          name: hexaflow-security-report
           path: |
             security_report.md
             trivy_report.json

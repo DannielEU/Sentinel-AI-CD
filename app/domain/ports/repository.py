@@ -1,5 +1,6 @@
 from typing import Protocol, runtime_checkable
 
+from domain.code_entities import CodeScanRecord
 from domain.entities import CVEException, ScanRecord
 
 
@@ -21,3 +22,11 @@ class RepositoryPort(Protocol):
     async def add_exception(self, exc: CVEException) -> None: ...
 
     async def delete_exception(self, cve_id: str) -> None: ...
+
+    async def save_code_scan(self, record: CodeScanRecord) -> None: ...
+
+    async def get_code_history(
+        self, project_name: str, limit: int = 20
+    ) -> list[CodeScanRecord]: ...
+
+    async def get_all_recent_code_scans(self, limit: int = 50) -> list[CodeScanRecord]: ...

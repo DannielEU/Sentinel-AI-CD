@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test rate limiting and authentication on Sentinel AI-CD Gate.
+Test rate limiting and authentication on HexaFlow Gate.
 
 Usage:
     python3 test_rate_limit.py --url http://localhost:8000
@@ -101,7 +101,7 @@ def test_rate_limit(base_url: str, token: Optional[str] = None, num_requests: in
         time.sleep(0.1)
 
     print(f"\n{'─'*80}")
-    print(f"Results:")
+    print("Results:")
     print(f"  ✅ Successful: {results['success']}")
     print(f"  ⚠️  Rate Limited: {results['rate_limited']}")
     print(f"  ❌ Errors: {results['errors']}")
@@ -156,7 +156,7 @@ def test_health(base_url: str):
     try:
         response = httpx.get(f"{base_url}/health", timeout=10)
         if response.status_code == 200:
-            print_success(f"Health check passed")
+            print_success("Health check passed")
             data = response.json()
             print_info(f"Response: {json.dumps(data, indent=2)}")
         else:
@@ -200,7 +200,7 @@ def test_valid_request(base_url: str, token: Optional[str] = None):
         response = httpx.post(url, json=payload, headers=headers, timeout=10)
 
         if response.status_code == 200:
-            print_success(f"Request successful (200)")
+            print_success("Request successful (200)")
             data = response.json()
             print_info(f"Decision: {data.get('decision')}")
             print_info(f"Reason: {data.get('reason')}")
@@ -223,13 +223,13 @@ def test_valid_request(base_url: str, token: Optional[str] = None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Test Sentinel AI-CD Gate rate limiting and authentication"
+        description="Test HexaFlow Gate rate limiting and authentication"
     )
     parser.add_argument(
         "--url",
         type=str,
         default="http://localhost:8000",
-        help="Base URL of Sentinel Gate (default: http://localhost:8000)"
+        help="Base URL of HexaFlow Gate (default: http://localhost:8000)"
     )
     parser.add_argument(
         "--token",
@@ -266,7 +266,7 @@ def main():
 
     print(f"\n{Colors.BOLD}{Colors.BLUE}")
     print("╔════════════════════════════════════════════════════════════════════╗")
-    print("║  Sentinel AI-CD Gate — Rate Limiting & Authentication Tester      ║")
+    print("║  HexaFlow Gate — Rate Limiting & Authentication Tester      ║")
     print("╚════════════════════════════════════════════════════════════════════╝")
     print(f"{Colors.RESET}")
 
