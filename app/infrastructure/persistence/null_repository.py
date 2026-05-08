@@ -7,6 +7,7 @@ All read operations return empty collections.
 
 import logging
 
+from domain.code_entities import CodeScanRecord
 from domain.entities import CVEException, ScanRecord
 
 logger = logging.getLogger(__name__)
@@ -44,3 +45,16 @@ class NullRepository:
         logger.debug(
             "DB not configured — delete exception ignored: %s", cve_id
         )
+
+    async def save_code_scan(self, record: CodeScanRecord) -> None:
+        logger.debug(
+            "DB not configured — code scan not persisted for %s", record.project_name
+        )
+
+    async def get_code_history(
+        self, project_name: str, limit: int = 20
+    ) -> list[CodeScanRecord]:
+        return []
+
+    async def get_all_recent_code_scans(self, limit: int = 50) -> list[CodeScanRecord]:
+        return []

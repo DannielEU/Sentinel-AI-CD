@@ -1,0 +1,319 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# HexaFlow Code Security Gate — drop-in workflow
+# ─────────────────────────────────────────────────────────────────────────────
+# Copia este archivo a .github/workflows/hexaflow-code.yml en cualquier
+# proyecto con código fuente. No requiere dependencias externas más allá
+# del gate HexaFlow ya desplegado.
+#
+# Configuración en el repo destino (Settings → Variables / Secrets):
+#
+#   Variables (vars.*):
+#     HEXAFLOW_GATE_URL   URL del gate desplegado
+#                         default: https://sentinelia-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net
+#     HEXAFLOW_CODE_EXTENSIONS  extensiones a analizar, separadas por espacio
+#                               default: ".java .py .js .ts .go .rb .php .cs .kt"
+#     HEXAFLOW_CODE_PATHS       rutas a buscar archivos (default: "src")
+#     HEXAFLOW_CODE_MAX_FILES   límite de archivos a enviar (default: "30")
+#
+#   Secrets (secrets.*):
+#     HEXAFLOW_TOKEN      Bearer token de autenticación del gate
+#
+# Comportamiento:
+#   - En push/PR: analiza los archivos modificados (delta analysis)
+#   - En workflow_dispatch: analiza todos los archivos en HEXAFLOW_CODE_PATHS
+#   - BLOCKED  → exit 1 (falla el job)
+#   - WARNING  → exit 0 (el job pasa, PR comment advierte)
+#   - PASSED   → exit 0
+# ─────────────────────────────────────────────────────────────────────────────
+name: HexaFlow Code Security Gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  hexaflow-code:
+    name: HexaFlow → Code Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. Resolver configuración ────────────────────────────────────────────
+      - name: Resolve config
+        id: config
+        env:
+          _GATE_URL:    ${{ vars.HEXAFLOW_GATE_URL }}
+          _EXTENSIONS:  ${{ vars.HEXAFLOW_CODE_EXTENSIONS }}
+          _PATHS:       ${{ vars.HEXAFLOW_CODE_PATHS }}
+          _MAX_FILES:   ${{ vars.HEXAFLOW_CODE_MAX_FILES }}
+        run: |
+          GATE_URL="${_GATE_URL:-https://sentinelia-avd7b2gabqe3b2g8.brazilsouth-01.azurewebsites.net}"
+          EXTENSIONS="${_EXTENSIONS:-.java .py .js .ts .go .rb .php .cs .kt}"
+          SEARCH_PATHS="${_PATHS:-src}"
+          MAX_FILES="${_MAX_FILES:-30}"
+
+          echo "gate_url=${GATE_URL}"       >> "$GITHUB_OUTPUT"
+          echo "extensions=${EXTENSIONS}"   >> "$GITHUB_OUTPUT"
+          echo "search_paths=${SEARCH_PATHS}" >> "$GITHUB_OUTPUT"
+          echo "max_files=${MAX_FILES}"     >> "$GITHUB_OUTPUT"
+
+          echo "Gate URL    : ${GATE_URL}"
+          echo "Extensions  : ${EXTENSIONS}"
+          echo "Search paths: ${SEARCH_PATHS}"
+          echo "Max files   : ${MAX_FILES}"
+
+      # ── 3. Detectar archivos a analizar ──────────────────────────────────────
+      - name: Detect files
+        id: files
+        env:
+          EXTENSIONS: ${{ steps.config.outputs.extensions }}
+          SEARCH_PATHS: ${{ steps.config.outputs.search_paths }}
+          MAX_FILES: ${{ steps.config.outputs.max_files }}
+        run: |
+          EXT_PATTERN=$(echo "$EXTENSIONS" | tr ' ' '\n' | sed 's/^\.//' | paste -sd '|')
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD \
+              | grep -E "\.($EXT_PATTERN)$" | head -n "$MAX_FILES" || true)
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            FILES=$(git diff --name-only HEAD~1 HEAD \
+              | grep -E "\.($EXT_PATTERN)$" | head -n "$MAX_FILES" || true)
+          else
+            FILES=$(find $SEARCH_PATHS -type f \
+              | grep -E "\.($EXT_PATTERN)$" | head -n "$MAX_FILES" || true)
+          fi
+
+          if [ -z "$FILES" ]; then
+            echo "No matching files detected — skipping analysis."
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Files to analyze:"
+            echo "$FILES"
+            echo "$FILES" > files_to_scan.txt
+            echo "has_files=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 4. Enviar al HexaFlow Code Gate ─────────────────────────────────────
+      - name: Send to HexaFlow Code Gate
+        id: gate
+        if: steps.files.outputs.has_files == 'true'
+        env:
+          HEXAFLOW_GATE_URL: ${{ steps.config.outputs.gate_url }}
+          HEXAFLOW_TOKEN:    ${{ secrets.HEXAFLOW_TOKEN }}
+          HEXAFLOW_CODE_EXTENSIONS: ${{ steps.config.outputs.extensions }}
+        run: |
+          FILES=$(cat files_to_scan.txt | tr '\n' ' ')
+          EXTS=$(echo "$HEXAFLOW_CODE_EXTENSIONS" | tr ' ' ' ')
+
+          python3 << 'PYEOF'
+          import json, os, sys, urllib.request, urllib.error
+          from pathlib import Path
+
+          gate_url = os.environ.get("HEXAFLOW_GATE_URL", "").rstrip("/")
+          token    = os.environ.get("HEXAFLOW_TOKEN", "")
+          project  = os.environ.get("GITHUB_REPOSITORY", "unknown").split("/")[-1]
+          commit   = os.environ.get("GITHUB_SHA", "")
+          branch   = os.environ.get("GITHUB_REF_NAME", "")
+
+          with open("files_to_scan.txt") as f:
+              file_paths = [l.strip() for l in f if l.strip()]
+
+          files_payload = []
+          for fp in file_paths:
+              p = Path(fp)
+              if not p.exists():
+                  continue
+              try:
+                  content = p.read_text(encoding="utf-8", errors="replace")[:50000]
+                  files_payload.append({"filename": fp, "content": content})
+              except Exception as e:
+                  print(f"  skip {fp}: {e}", file=sys.stderr)
+
+          if not files_payload:
+              print("No readable files — skipping.")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
+                  gh.write("gate_decision=PASSED\ngate_exit=0\n")
+              sys.exit(0)
+
+          payload = {
+              "project_name": project,
+              "commit_sha":   commit or None,
+              "branch":       branch or None,
+              "files":        files_payload,
+          }
+
+          headers = {"Content-Type": "application/json"}
+          if token:
+              headers["Authorization"] = f"Bearer {token}"
+
+          print(f"Gate URL : {gate_url}")
+          print(f"Project  : {project}  Commit: {commit[:8] if commit else '—'}")
+          print(f"Files    : {len(files_payload)}")
+          print()
+
+          req = urllib.request.Request(
+              f"{gate_url}/analyze-code",
+              data=json.dumps(payload).encode(),
+              headers=headers,
+              method="POST",
+          )
+
+          try:
+              with urllib.request.urlopen(req, timeout=600) as resp:
+                  response = json.loads(resp.read())
+          except urllib.error.HTTPError as e:
+              body = e.read().decode()
+              print(f"Gate HTTP error {e.code}: {body}", file=sys.stderr)
+              with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
+                  gh.write("gate_decision=ERROR\ngate_exit=3\n")
+              sys.exit(3)
+          except Exception as e:
+              print(f"Gate connection error: {e}", file=sys.stderr)
+              with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
+                  gh.write("gate_decision=ERROR\ngate_exit=3\n")
+              sys.exit(3)
+
+          decision = response.get("decision", "ERROR")
+          reason   = response.get("reason", "")
+          summary  = response.get("summary", {})
+          total    = response.get("total_vulnerabilities", 0)
+
+          print(f"Decision  : {decision}")
+          print(f"Reason    : {reason}")
+          print(f"Findings  : {total} (C:{summary.get('CRITICAL',0)} H:{summary.get('HIGH',0)} M:{summary.get('MEDIUM',0)} L:{summary.get('LOW',0)})")
+
+          with open("code_gate_response.json", "w") as f:
+              json.dump(response, f, indent=2)
+
+          exit_code = {"PASSED": 0, "BLOCKED": 1, "WARNING": 2}.get(decision, 3)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
+              gh.write(f"gate_decision={decision}\n")
+              gh.write(f"gate_exit={exit_code}\n")
+          PYEOF
+
+      # ── 5. Construir comentario de PR ────────────────────────────────────────
+      - name: Build PR comment
+        if: always() && steps.files.outputs.has_files == 'true'
+        env:
+          GATE_DECISION: ${{ steps.gate.outputs.gate_decision }}
+          HEXAFLOW_GATE_URL: ${{ steps.config.outputs.gate_url }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, datetime
+
+          decision  = os.environ.get("GATE_DECISION", "UNKNOWN")
+          gate_url  = os.environ.get("HEXAFLOW_GATE_URL", "")
+          ts        = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+          try:
+              with open("code_gate_response.json") as f:
+                  data = json.load(f)
+          except Exception:
+              data = {}
+
+          summary  = data.get("summary", {})
+          total    = data.get("total_vulnerabilities", 0)
+          reason   = data.get("reason", "")
+          vulns    = data.get("vulnerabilities", [])
+          project  = data.get("project_name", "-")
+          commit   = data.get("commit_sha", "")[:8] if data.get("commit_sha") else "—"
+
+          icon = {"PASSED": "✅", "WARNING": "⚠️", "BLOCKED": "❌"}.get(decision, "❓")
+
+          lines = [
+              f"## {icon} HexaFlow Code Security Gate — {decision}",
+              f"_`{project}` · commit `{commit}` · {ts}_",
+              "",
+              "### Resumen de hallazgos",
+              "",
+              "| Severidad | Total |",
+              "|-----------|-------|",
+              f"| 🔴 Critical | **{summary.get('CRITICAL', 0)}** |",
+              f"| 🟠 High     | **{summary.get('HIGH', 0)}** |",
+              f"| 🟡 Medium   | {summary.get('MEDIUM', 0)} |",
+              f"| 🔵 Low      | {summary.get('LOW', 0)} |",
+              f"| **Total**  | **{total}** |",
+              "",
+              f"**Decisión:** {reason}",
+          ]
+
+          if vulns:
+              crit_high = [v for v in vulns if v.get("severity") in ("CRITICAL", "HIGH")]
+              if crit_high:
+                  lines += [
+                      "",
+                      "### 🔴🟠 Critical & High — acción requerida",
+                      "",
+                      "| Severidad | Tipo | Archivo | Línea | CWE |",
+                      "|-----------|------|---------|-------|-----|",
+                  ]
+                  for v in crit_high[:20]:
+                      lines.append(
+                          f"| {v.get('severity')} | {v.get('type','-')} "
+                          f"| `{v.get('filename','-')}` "
+                          f"| {v.get('line_number') or '?'} "
+                          f"| {v.get('cwe_id') or '—'} |"
+                      )
+                  if len(crit_high) > 20:
+                      lines.append(f"_…y {len(crit_high) - 20} más._")
+
+          if decision == "BLOCKED":
+              lines += ["", "> **Push bloqueado.** Corrige las vulnerabilidades Critical/High antes de mergear."]
+          elif decision == "WARNING":
+              lines += ["", "> Merge permitido con advertencias. Abre un ticket de remediación para los hallazgos Medium/High."]
+
+          if gate_url:
+              lines += ["", "---", f"_Gate: {gate_url}_"]
+
+          with open("code_pr_comment.md", "w") as f:
+              f.write("\n".join(lines))
+          print("code_pr_comment.md escrito.")
+          PYEOF
+
+      # ── 6. Publicar comentario en el PR ──────────────────────────────────────
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request' && steps.files.outputs.has_files == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: hexaflow-code
+          path: code_pr_comment.md
+
+      # ── 7. Subir artefactos ──────────────────────────────────────────────────
+      - name: Upload artifacts
+        if: always() && steps.files.outputs.has_files == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexaflow-code-report-${{ github.sha }}
+          path: |
+            code_gate_response.json
+            code_pr_comment.md
+          retention-days: 30
+
+      # ── 8. Aplicar decisión del gate ─────────────────────────────────────────
+      - name: Enforce gate decision
+        if: always() && steps.files.outputs.has_files == 'true'
+        run: |
+          EXIT="${{ steps.gate.outputs.gate_exit }}"
+          DECISION="${{ steps.gate.outputs.gate_decision }}"
+
+          case "$EXIT" in
+            0) echo "✅ PASSED — no blocking vulnerabilities." ;;
+            2) echo "⚠️  WARNING — proceed with caution." ;;
+            1) echo "❌ BLOCKED — critical/high vulnerabilities found. Fix before merging."; exit 1 ;;
+            3) echo "❌ ERROR — gate unreachable. Failing safely."; exit 1 ;;
+            *) echo "❓ Unknown result (exit=$EXIT, decision=$DECISION)."; exit 1 ;;
+          esac

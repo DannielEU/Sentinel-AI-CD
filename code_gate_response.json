@@ -1,0 +1,17 @@
+{
+  "decision": "PASSED",
+  "reason": "No critical or high-severity vulnerabilities found in source code.",
+  "files_analyzed": 3,
+  "total_vulnerabilities": 0,
+  "summary": {
+    "CRITICAL": 0,
+    "HIGH": 0,
+    "MEDIUM": 0,
+    "LOW": 0
+  },
+  "vulnerabilities": [],
+  "blocked": false,
+  "project_name": "new-theboys-backend",
+  "commit_sha": null,
+  "ai_provider": "code:ollama:qwen2.5-coder:1.5b"
+}

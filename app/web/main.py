@@ -24,9 +24,11 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
+from application.code_gate_service import CodeGateService
 from application.gate_service import GateService
+from domain.code_entities import CodeScanDecision, CodeScanRecord, CodeScanReport
 from domain.entities import CVEException, GateDecision, ImageReport, ScanRecord
-from infrastructure.ai.factory import create_ai_provider
+from infrastructure.ai.factory import create_ai_provider, create_code_analyzer
 from infrastructure.persistence.factory import create_repository
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
@@ -52,23 +54,25 @@ IMAGE_NAME_SAFE = re.compile(r"^[a-zA-Z0-9.:/_\-]+$")
 _request_timestamps: dict[str, list[float]] = {}
 _auth_failures: dict[str, list[float]] = {}
 
-# Shared service instance (set in lifespan)
+# Shared service instances (set in lifespan)
 _gate_service: GateService | None = None
+_code_gate_service: CodeGateService | None = None
 _repo = None
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _gate_service, _repo
+    global _gate_service, _code_gate_service, _repo
 
     ai_provider = create_ai_provider()
+    code_analyzer = create_code_analyzer()
     _repo = await create_repository()
     _gate_service = GateService(ai_provider=ai_provider, repository=_repo)
+    _code_gate_service = CodeGateService(code_analyzer=code_analyzer, repository=_repo)
 
-    logger.info("HexaFlow gate ready")
+    logger.info("HexaFlow gate ready (image + code analysis)")
     yield
-    # Cleanup (nothing needed currently)
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -301,6 +305,87 @@ async def analyze_image(
         raise HTTPException(status_code=500, detail=str(exc) or "Internal error")
 
 
+# ── Code analysis endpoint ───────────────────────────────────────────────────
+
+@app.post(
+    "/analyze-code",
+    response_model=CodeScanDecision,
+    tags=["code-gate"],
+    summary="Analyse source code files for security vulnerabilities and return a gate decision",
+)
+async def analyze_code(
+    report: CodeScanReport,
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    """
+    Receive source code files and return a security gate decision (PASSED / WARNING / BLOCKED).
+
+    ### Pipeline
+    1. Each file is analyzed via the configured AI provider (Ollama / OpenAI / Anthropic)
+    2. OWASP Top 10 vulnerabilities are identified with severity: CRITICAL | HIGH | MEDIUM | LOW
+    3. Deterministic threshold rules determine the final decision
+    4. Result is persisted to the database if configured
+
+    ### Decision values
+    | Value     | Pipeline behaviour                     |
+    |-----------|----------------------------------------|
+    | `PASSED`  | No critical or high findings — proceed |
+    | `WARNING` | Medium/high findings — review required |
+    | `BLOCKED` | Critical/high findings — push blocked  |
+    """
+    ip = _client_ip(request)
+
+    if not _check_rate_limit(ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded: max {RATE_LIMIT_REQUESTS} req/{RATE_LIMIT_WINDOW}s.",
+        )
+
+    _require_token(authorization, ip)
+
+    logger.info(
+        "Code scan request: project='%s' files=%d from %s",
+        report.project_name,
+        len(report.files),
+        ip,
+    )
+
+    try:
+        return await _code_gate_service.analyze(report)  # type: ignore[union-attr]
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail=f"AI provider not reachable: {exc}")
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail=f"AI provider timed out: {exc}")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI provider returned HTTP {exc.response.status_code}",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error during code gate analysis")
+        raise HTTPException(status_code=500, detail=str(exc) or "Internal error")
+
+
+# ── Code history endpoint ─────────────────────────────────────────────────────
+
+@app.get("/code-history/{project_name}", response_model=list[CodeScanRecord], tags=["code-gate"])
+async def get_code_history(
+    project_name: str,
+    request: Request,
+    limit: int = 20,
+    authorization: str | None = Header(default=None),
+):
+    """Return the code scan history for a specific project (requires DB)."""
+    _require_token(authorization, _client_ip(request))
+    if not _repo or not _repo.is_available:
+        raise HTTPException(
+            status_code=503,
+            detail="Database not configured. Set DATABASE_URL to enable history.",
+        )
+    return await _repo.get_code_history(project_name, limit=min(limit, 100))
+
+
 # ── History endpoint ──────────────────────────────────────────────────────────
 
 @app.get("/history/{image_name}", response_model=list[ScanRecord], tags=["history"])
@@ -524,9 +609,16 @@ html{transition:background-color .2s,color .2s}
   --bg:#f4f2ff;--bg2:#ebe8f9;--card:#fff;--card2:#f0eeff;
   --border:#b0a8e0;--border2:#cec8f0;
   --text:#0d0b1e;--text2:#474080;--muted:#6b6080;
+  --gold:#92400e;--yellow:#78350f;
+  --ok:#15803d;--err:#b91c1c;
 }
 [data-theme="light"] .topbar{box-shadow:0 2px 12px rgba(30,0,255,.08)}
 [data-theme="light"] .scan-row:hover td{background:rgba(30,0,255,.04)}
+[data-theme="light"] .vuln-l{color:#1d4ed8}
+[data-theme="light"] .dec-badge{filter:brightness(0.75)}
+[data-theme="light"] .btn-gold{background:#FFBD00;color:#13102a}
+[data-theme="light"] .btn-gold:hover{background:#FFFB00}
+[data-theme="light"] .logo-text span{color:#FFBD00}
 /* Theme button */
 .theme-btn{background:none;border:1px solid var(--border2);border-radius:var(--rs);padding:6px 12px;cursor:pointer;color:var(--text2);display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:600;transition:all .15s;line-height:1}
 .theme-btn:hover{background:var(--card2);border-color:var(--border);color:var(--text)}
@@ -832,7 +924,99 @@ def _vuln_breakdown_svg(records: list[ScanRecord]) -> str:
     )
 
 
-def _render_dashboard(title: str, records: list[ScanRecord], exceptions: list[CVEException]) -> str:
+def _render_vuln_cards(vulns: list) -> str:
+    if not vulns:
+        return '<p class="no-data" style="margin:8px 0">No vulnerability details stored.</p>'
+
+    sev_colors = {
+        "CRITICAL": ("#ef4444", "#450a0a"),
+        "HIGH":     ("#ea580c", "#431407"),
+        "MEDIUM":   ("#d97706", "#451a03"),
+        "LOW":      ("#3b82f6", "#172554"),
+    }
+    cards = ""
+    for v in vulns:
+        sev = v.severity if hasattr(v, "severity") else v.get("severity", "LOW")
+        vtype = v.type if hasattr(v, "type") else v.get("type", "Unknown")
+        desc = v.description if hasattr(v, "description") else v.get("description", "")
+        snippet = (v.code_snippet if hasattr(v, "code_snippet") else v.get("code_snippet")) or ""
+        suggestion = (v.suggestion if hasattr(v, "suggestion") else v.get("suggestion")) or ""
+        cwe = (v.cwe_id if hasattr(v, "cwe_id") else v.get("cwe_id")) or ""
+        fname = v.filename if hasattr(v, "filename") else v.get("filename", "")
+        line = v.line_number if hasattr(v, "line_number") else v.get("line_number")
+
+        fg, bg = sev_colors.get(sev, ("#808066", "#1a1a1a"))
+        file_line = f"{_esc(fname)}:{line}" if line else _esc(fname)
+
+        cards += (
+            f'<div style="border-left:4px solid {fg};background:{bg}22;'
+            f'border-radius:6px;padding:10px 14px;margin:6px 0">'
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
+            f'<span style="background:{fg};color:#000;font-size:.72rem;font-weight:700;'
+            f'padding:2px 8px;border-radius:4px">{_esc(sev)}</span>'
+            f'<strong style="color:{fg};font-size:.9rem">{_esc(vtype)}</strong>'
+            f'<code style="color:var(--muted);font-size:.78rem">{file_line}</code>'
+            f'{f"<code style=\"color:var(--muted);font-size:.75rem\">{_esc(cwe)}</code>" if cwe else ""}'
+            f'</div>'
+            f'<p style="color:var(--text2);font-size:.85rem;margin:4px 0">{_esc(desc)}</p>'
+        )
+        if snippet:
+            cards += f'<pre style="background:var(--bg);padding:6px 10px;border-radius:4px;font-size:.78rem;overflow-x:auto;margin:6px 0">{_esc(snippet)}</pre>'
+        if suggestion:
+            cards += f'<p style="color:var(--ok);font-size:.82rem;margin:4px 0"><strong>Fix:</strong> {_esc(suggestion)}</p>'
+        cards += "</div>"
+    return cards
+
+
+def _render_code_scan_rows(code_records: list[CodeScanRecord]) -> str:
+    if not code_records:
+        return '<p class="no-data">No code scan records yet.</p>'
+
+    decision_colors = {"PASSED": "#4ade80", "WARNING": "#FFBD00", "BLOCKED": "#f87171"}
+    rows = ""
+    for idx, r in enumerate(code_records):
+        color = decision_colors.get(r.decision, "#808066")
+        ts = _esc(r.scanned_at.strftime("%Y-%m-%d %H:%M UTC") if r.scanned_at else "—")
+        sha = _esc(r.commit_sha[:8] if r.commit_sha else "—")
+        branch = _esc(r.branch or "—")
+        project = _esc(r.project_name)
+        ai = _esc(r.ai_provider or "—")
+        rid = f"cdr-{idx}"
+        vuln_cards = _render_vuln_cards(r.vulnerabilities)
+        rows += (
+            f'<tr class="scan-row" onclick="toggleRow(\'{rid}\')">'
+            f'<td class="col-date">{ts}</td>'
+            f'<td><span class="dec-badge" style="background:{color}20;color:{color};border:1px solid {color}40">{_esc(r.decision)}</span></td>'
+            f'<td><code>{project}</code></td>'
+            f'<td><code>{sha}</code> / {branch}</td>'
+            f'<td><span class="vuln-c">{r.critical_count}</span>&#8202;/&#8202;'
+            f'<span class="vuln-h">{r.high_count}</span>&#8202;/&#8202;'
+            f'<span class="vuln-m">{r.medium_count}</span>&#8202;/&#8202;'
+            f'<span class="vuln-l">{r.low_count}</span></td>'
+            f'<td><span class="exp-icon">&#9660;</span></td>'
+            f'</tr>'
+            f'<tr id="{rid}" class="detail-row" style="display:none">'
+            f'<td colspan="6"><div class="detail-content">'
+            f'<div class="detail-meta" style="margin-bottom:12px">'
+            f'<span><strong>Files analyzed:</strong> {r.files_analyzed}</span>'
+            f'<span><strong>AI:</strong> {ai}</span>'
+            f'<span><strong>Commit:</strong> {_esc(r.commit_sha or "—")}</span>'
+            f'<span><strong>Branch:</strong> {branch}</span>'
+            f'</div>'
+            f'<div class="detail-section"><strong>Vulnerabilities</strong>'
+            f'<div style="margin-top:8px">{vuln_cards}</div>'
+            f'</div>'
+            f'</div></td></tr>\n'
+        )
+    return (
+        '<div class="table-wrapper"><table><thead><tr>'
+        '<th>Date</th><th>Decision</th><th>Project</th><th>Commit / Branch</th>'
+        '<th>C&#8202;/&#8202;H&#8202;/&#8202;M&#8202;/&#8202;L</th><th></th>'
+        f'</tr></thead><tbody>{rows}</tbody></table></div>'
+    )
+
+
+def _render_dashboard(title: str, records: list[ScanRecord], exceptions: list[CVEException], code_records: list[CodeScanRecord] | None = None) -> str:
     safe_title = _esc(title)
     total = len(records)
     approved = sum(1 for r in records if r.decision == "APPROVED")
@@ -900,6 +1084,9 @@ def _render_dashboard(title: str, records: list[ScanRecord], exceptions: list[CV
     chart_svg2 = _donut_chart_svg(approved, warning, rejected)
     chart_svg3 = _vuln_breakdown_svg(records)
     chart_count = min(total, 20)
+
+    code_records = code_records or []
+    code_section_html = _render_code_scan_rows(code_records)
 
     scan_section_html = (
         '<input id="search-input" type="text" class="search-input"'
@@ -1093,6 +1280,13 @@ def _render_dashboard(title: str, records: list[ScanRecord], exceptions: list[CV
     {exc_section_html}
   </div>
 
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Code Scan History</span>
+    </div>
+    {code_section_html}
+  </div>
+
   <div class="footer">
     <span>HexaFlow Security Gate v2.0</span>
     <a href="/docs">API Docs</a>
@@ -1107,7 +1301,7 @@ def _render_dashboard(title: str, records: list[ScanRecord], exceptions: list[CV
 
 @app.get("/dashboard", response_class=HTMLResponse, tags=["dashboard"])
 async def dashboard_overview(request: Request):
-    """Overall security dashboard — recent scans across all images."""
+    """Overall security dashboard — recent scans across all images and code projects."""
     _require_dashboard_token(request)
     if not _repo or not _repo.is_available:
         return HTMLResponse(
@@ -1116,7 +1310,8 @@ async def dashboard_overview(request: Request):
         )
     records = await _repo.get_all_recent(limit=50)
     exceptions = await _repo.get_active_exceptions()
-    return _render_dashboard("Security Overview", records, exceptions)
+    code_records = await _repo.get_all_recent_code_scans(limit=20)
+    return _render_dashboard("Security Overview", records, exceptions, code_records)
 
 
 @app.get("/dashboard/{image_name:path}", response_class=HTMLResponse, tags=["dashboard"])
@@ -1133,7 +1328,8 @@ async def dashboard_image(image_name: str, request: Request):
         raise HTTPException(status_code=400, detail="Invalid image name format")
     records = await _repo.get_history(decoded, limit=30)
     exceptions = await _repo.get_active_exceptions()
-    return _render_dashboard(f"Image search: {decoded}", records, exceptions)
+    code_records = await _repo.get_all_recent_code_scans(limit=10)
+    return _render_dashboard(f"Image: {decoded}", records, exceptions, code_records)
 
 
 # ── Global exception handler ──────────────────────────────────────────────────
